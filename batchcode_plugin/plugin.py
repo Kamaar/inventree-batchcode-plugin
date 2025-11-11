@@ -1,4 +1,4 @@
-from plugin import InvenTreePlugin, SettingsMixin
+from plugin import InvenTreePlugin, EventMixin
 from stock.models import StockItem
 from django.db.models import Max
 
@@ -42,3 +42,4 @@ class BatchCodePlugin(EventMixin, InvenTreePlugin):
             new_batch = f"B{new_number:06d}"
             instance.batch = new_batch
             instance.save()
+
