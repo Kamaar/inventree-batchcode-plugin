@@ -6,7 +6,8 @@ class BatchCodePlugin(EventMixin, InvenTreePlugin):
     """
     Plugin per generare automaticamente un codice batch univoco e progressivo.
     """
-
+    AUTHOR = "Simone Amadori"
+    WEBSITE = "https://github.com/Kamaar"
     NAME = "BatchCodePlugin"
     SLUG = "batchcode"
     TITLE = "Batch Code Generator"
