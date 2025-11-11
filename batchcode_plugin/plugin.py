@@ -1,4 +1,5 @@
-from plugin import InvenTreePlugin, EventMixin
+from plugin import InvenTreePlugin
+from inventree.plugin.mixins import EventMixin
 from stock.models import StockItem
 from django.db.models import Max
 
