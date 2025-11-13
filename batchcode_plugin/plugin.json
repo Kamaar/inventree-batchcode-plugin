@@ -1,0 +1,8 @@
+{
+  "name": "batchcode",
+  "version": "1.7.0",
+  "author": "Simone Amadori",
+  "description": "Batch Code Generator plugin",
+  "url": "https://github.com/simoneamadori/inventree_batchcode_plugin",
+  "public": true
+}
