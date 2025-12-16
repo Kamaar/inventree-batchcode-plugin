@@ -81,65 +81,37 @@ The BatchCode plugin automatically generates sequential, formatted batch codes f
 
 ---
 
-## Parametri SETTINGS
+### Configuration
+Available plugin settings:
+- **TARGET_FIELD**: Field in StockItem where batch code is saved (`batch` by default).
+- **CODE_FORMAT**: Batch code format using placeholders `{prefix}`, `{num}`, `{date}`, `{part}`, `{loc}`, `{sep}`.
+- **PREFIX**: Static prefix if location prefix not used.
+- **MIN_DIGITS**: Minimum digits for numeric part.
+- **DAILY_RESET**: Reset counter daily.
+- **PER_PART**: Separate counter per Part.
+- **PER_LOCATION**: Separate counter per StockLocation.
+- **TRIGGER_MODE**: `always`, `on_receive`, or `manual`.
+- **USE_LOCATION_PREFIX**: Use StockLocation field as prefix.
+- **LOCATION_FIELD**: Field from StockLocation to use as prefix.
+- **INCLUDE_DATE**: Include date in code.
+- **SEPARATOR**: Separator character.
+- **ENABLED**: Enable/disable automatic batch code generation.
+- **MANUAL_BUTTON**: Show manual generate button.
+- **MANUAL_BUTTON_ROLE**: Who can use manual button (`all`, `staff`, `superuser`).
 
-| Parametro | Descrizione | Default |
-|-----------|-------------|---------|
-| `TARGET_FIELD` | Campo dello StockItem dove salvare il batch | `"batch"` |
-| `CODE_FORMAT` | Formato batch `{prefix}{date:%Y%m%d}-{num:04d}` | `{prefix}{date:%Y%m%d}-{num:04d}` |
-| `PREFIX` | Prefisso statico se non si usa location | `"B"` |
-| `MIN_DIGITS` | Numero minimo di cifre | `4` |
-| `DAILY_RESET` | Reset giornaliero del contatore | `False` |
-| `PER_PART` | Contatore separato per ogni parte | `False` |
-| `TRIGGER_MODE` | Quando generare batch (`always`, `on_receive`, `manual`) | `"always"` |
-| `USE_LOCATION_PREFIX` | Usa valore StockLocation come prefisso | `False` |
-| `LOCATION_FIELD` | Campo StockLocation da usare | `"name"` |
-| `ENABLED` | Abilita generazione automatica | `True` |
-| `MANUAL_BUTTON` | Mostra pulsante manuale nella UI | `True` |
-| `MANUAL_BUTTON_ROLE` | Ruolo che può usare pulsante (`all`, `staff`, `superuser`) | `"staff"` |
+### Usage
+- Automatic generation occurs based on `TRIGGER_MODE`.
+- Manual generation via Actions menu button if enabled.
+- Preview codes can be logged for testing purposes.
 
----
+### Localization
+- Plugin in English.
+- Default locale in Italian.
+- To add more translations, create `.po` files in `locale/<lang>/LC_MESSAGES/` and compile to `.mo`.
 
-## Installazione
+### Logging
+Batch code generation logs are recorded via `inventree` logger:
+```text
+[BatchCodePlugin] Generated preview batch: B20251216-0001
 
-1. Copia la cartella `batchcode_plugin` in `PLUGINS_DIR` di InvenTree:
 
-```
-plugins/
-└── batchcode_plugin/
-    ├── __init__.py
-    └── plugin.py
-```
-
-2. Aggiorna `config.yaml`:
-
-```yaml
-PLUGINS_ENABLED: true
-PLUGINS_DIR: /percorso/plugins/
-LOG_LEVEL: INFO
-```
-
-3. Riavvia backend:
-
-```bash
-python3 manage.py runserver 0.0.0.0:8000
-```
-
----
-
-## Utilizzo
-
-- **Batch automatico:** alla creazione di un nuovo StockItem
-- **Pulsante manuale:** su InvenTree 1.2+, nella scheda StockItem, per generare batch singolo
-- **Log:** ogni batch generato viene loggato su console o file di log
-
----
-
-## Compatibilità
-
-| Funzione                        | 1.1.3                 | 1.2+                  |
-|---------------------------------|----------------------|----------------------|
-| Generazione automatica batch     | ✅ via signal Django  | ✅ via EventMixin     |
-| Pulsante manuale UI              | ❌ non visibile       | ✅ visibile           |
-| Parametri SETTINGS               | ❌ API settings non visibili | ✅ API settings funzionano |
-| Log batch                        | ✅                    | ✅                   |
