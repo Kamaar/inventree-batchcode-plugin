@@ -65,6 +65,20 @@ Supporta:
 - Logging automatico e gestione eccezioni
 - Versione stabile e completa
 
+### Versione 1.7.3
+
+## Overview
+The BatchCode plugin automatically generates sequential, formatted batch codes for StockItems in InvenTree. Compatible with versions 1.1.3 → 1.2+.
+
+### Features
+- Automatic batch code generation on StockItem creation.
+- Optional manual generation via Actions menu.
+- Supports per-Part and per-Location sequential counters.
+- Configurable prefix, date, and number formatting (`CODE_FORMAT`).
+- Daily reset of counters.
+- Multi-language ready (English plugin, Italian default locale).
+- Logging of batch code generation.
+
 ---
 
 ## Parametri SETTINGS
