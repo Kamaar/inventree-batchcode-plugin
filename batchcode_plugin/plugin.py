@@ -1,205 +1,160 @@
-from plugin import InvenTreePlugin
-from plugin.mixins import SettingsMixin
-from stock.models import StockItem
+from typing import Optional
+import logging
+import re
+
+from django.utils.translation import gettext_lazy as _
+from django.utils import timezone
+from django.db.models import Max
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from django.db.models import Max
-from django.core.validators import MinValueValidator, MaxValueValidator
-from django.utils.translation import gettext_lazy as _
-import datetime
-import logging
+
+from plugin import InvenTreePlugin
+from plugin.mixins import SettingsMixin, ValidationMixin
+from stock.models import StockItem
 
 logger = logging.getLogger("inventree")
 
 
-class BatchCodePlugin(SettingsMixin, InvenTreePlugin):
+class BatchCodePlugin(SettingsMixin, ValidationMixin, InvenTreePlugin):
     """
-    Plugin Batch Code Generator
-    Compatibile 1.1.3/1.2+
+    Batch Code Generator Plugin
+    Compatible with InvenTree 1.1.3 -> 1.2+
     """
 
-    AUTHOR = "Simone Amadori"
-    WEBSITE = "https://github.com/Kamaar"
     NAME = "BatchCodePlugin"
     SLUG = "batchcode"
-    TITLE = "Batch Code Generator"
-    DESCRIPTION = "Genera codici batch numerici progressivi per ogni nuovo StockItem"
-    VERSION = "1.7"
+    TITLE = _("Batch Code Generator")
+    DESCRIPTION = _("Generate progressive batch codes for stock items")
+    VERSION = "1.7.2"
+    AUTHOR = "Simone Amadori"
 
     SETTINGS = {
         "TARGET_FIELD": {
-            "name": _("Target Field"),
-            "description": _("Campo dello StockItem dove salvare il codice (es. 'batch', 'serial' o campo custom)"),
+            "name": _("Target field"),
+            "description": _("StockItem field where the batch code will be stored"),
             "default": "batch",
         },
         "CODE_FORMAT": {
-            "name": _("Code Format"),
-            "description": _("Formato del codice batch. Placeholders: {prefix}, {num}, {date}, {part}, {loc}. Es.: {prefix}{date:%Y%m%d}-{num:04d}"),
-            "default": "{prefix}{date:%Y%m%d}-{num:04d}",
+            "name": _("Code format"),
+            "description": _(
+                "Batch format string. Available placeholders: "
+                "{prefix}, {num}, {date}, {part}, {loc}, {sep}. "
+                "Example: {prefix}{date:%Y%m%d}{sep}{num:04d}"
+            ),
+            "default": "{prefix}{date:%Y%m%d}{sep}{num:04d}",
         },
         "PREFIX": {
             "name": _("Prefix"),
-            "description": _("Prefisso statico da usare se non si usa il prefisso location."),
+            "description": _("Static prefix used when no location prefix is enabled"),
             "default": "B",
         },
+        "SEPARATOR": {
+            "name": _("Separator"),
+            "description": _("Separator between prefix/date and numeric counter"),
+            "default": "-",
+        },
         "MIN_DIGITS": {
-            "name": _("Min digits"),
-            "description": _("Numero minimo di cifre per la parte numerica del codice."),
+            "name": _("Minimum digits"),
+            "description": _("Minimum number of digits for the numeric counter"),
             "default": 4,
-            "validator": [int, MinValueValidator(1), MaxValueValidator(12)],
         },
         "DAILY_RESET": {
-            "name": _("Reset giornaliero"),
-            "description": _("Se attivo, il contatore si azzera ogni giorno (basato sulla data di creazione)."),
-            "validator": bool,
+            "name": _("Daily reset"),
+            "description": _("Reset counter every day"),
             "default": False,
         },
         "PER_PART": {
-            "name": _("Progressivo per parte"),
-            "description": _("Se attivo, ogni Part avrà il suo contatore separato."),
-            "validator": bool,
+            "name": _("Per-part counter"),
+            "description": _("Use a separate counter for each part"),
             "default": False,
         },
-        "TRIGGER_MODE": {
-            "name": _("Trigger Mode"),
-            "description": _("Quando generare automaticamente il codice batch."),
-            "default": "always",
-            "choices": [
-                ("always", _("Sempre")),
-                ("on_receive", _("Solo alla ricezione da ordine d'acquisto")),
-                ("manual", _("Solo via pulsante/manuale")),
-            ],
+        "PER_LOCATION": {
+            "name": _("Per-location counter"),
+            "description": _("Use a separate counter for each stock location"),
+            "default": False,
         },
         "USE_LOCATION_PREFIX": {
-            "name": _("Use Location Prefix"),
-            "description": _("Se attivo, usa un valore della StockLocation come prefisso (es. name o code)."),
-            "validator": bool,
+            "name": _("Use location prefix"),
+            "description": _("Use a StockLocation field as prefix"),
             "default": False,
         },
         "LOCATION_FIELD": {
-            "name": _("Location Field"),
-            "description": _("Campo della StockLocation da usare come prefisso (es. 'name' o 'code')."),
+            "name": _("Location field"),
+            "description": _("StockLocation field to use as prefix (e.g. name or code)"),
             "default": "name",
         },
         "ENABLED": {
             "name": _("Enabled"),
-            "description": _("Abilita o disabilita la generazione automatica dei codici batch."),
-            "validator": bool,
+            "description": _("Enable automatic batch code generation"),
             "default": True,
-        },
-        "MANUAL_BUTTON": {
-            "name": _("Manual generate button"),
-            "description": _("Mostra un pulsante nella scheda StockItem per generare manualmente il codice batch."),
-            "validator": bool,
-            "default": True,
-        },
-        "MANUAL_BUTTON_ROLE": {
-            "name": _("Manual button allowed role"),
-            "description": _("Chi può usare il pulsante manuale"),
-            "default": "staff",
-            "choices": [
-                ("all", _("Tutti")),
-                ("staff", _("Solo staff")),
-                ("superuser", _("Solo superuser")),
-            ],
         },
     }
 
-    # --- Eventi per InvenTree 1.2+ ---
-    def register_events(self):
+    def generate_batch_code(self, **kwargs) -> Optional[str]:
+        """Called by InvenTree when a new batch code is required"""
+
+        if not self.get_setting("ENABLED", True):
+            return None
+
+        stock_item = kwargs.get("stock_item")
+        part = getattr(stock_item, "part", None) if stock_item else None
+        location = getattr(stock_item, "location", None) if stock_item else None
+
+        prefix = self.get_setting("PREFIX", "B")
+        if self.get_setting("USE_LOCATION_PREFIX", False) and location:
+            field = self.get_setting("LOCATION_FIELD", "name")
+            prefix = getattr(location, field, prefix) or prefix
+
+        sep = self.get_setting("SEPARATOR", "-")
+        code_format = self.get_setting("CODE_FORMAT")
+        min_digits = int(self.get_setting("MIN_DIGITS", 4))
+
+        target = self.get_setting("TARGET_FIELD", "batch")
+        qs = StockItem.objects.exclude(**{f"{target}__isnull": True}).exclude(**{target: ""})
+
+        if self.get_setting("PER_PART", False) and part:
+            qs = qs.filter(part=part)
+
+        if self.get_setting("PER_LOCATION", False) and location:
+            qs = qs.filter(location=location)
+
+        if self.get_setting("DAILY_RESET", False):
+            today = timezone.now().date()
+            qs = qs.filter(created__date=today)
+
+        last_code = qs.aggregate(Max(target)).get(f"{target}__max")
+
+        counter = 1
+        if last_code:
+            match = re.search(r"(\d+)$", str(last_code))
+            if match:
+                counter = int(match.group(1)) + 1
+
+        now = timezone.now()
+
         try:
-            return {"stockitem.created": self.on_stockitem_created}
-        except Exception:
-            return []
-
-    def on_stockitem_created(self, sender, instance, **kwargs):
-        """
-        Genera batch code automatico
-        """
-        try:
-            if not self.get_setting("ENABLED", True):
-                return
-            if self.get_setting("TRIGGER_MODE") != "always":
-                return
-
-            target_field = self.get_setting("TARGET_FIELD", "batch")
-            if getattr(instance, target_field, None):
-                return
-
-            prefix = self.get_setting("PREFIX", "B")
-            code_format = self.get_setting("CODE_FORMAT", "{prefix}{date:%Y%m%d}-{num:04d}")
-            min_digits = int(self.get_setting("MIN_DIGITS", 4))
-            daily_reset = self.get_setting("DAILY_RESET", False)
-            per_part = self.get_setting("PER_PART", False)
-
-            queryset = StockItem.objects.exclude(**{f"{target_field}__isnull": True}).exclude(**{target_field: ""})
-            if per_part and instance.part:
-                queryset = queryset.filter(part=instance.part)
-            if daily_reset:
-                today = datetime.date.today()
-                queryset = queryset.filter(creation_date__date=today)
-
-            last_batch = queryset.aggregate(Max(target_field))
-            last_code = last_batch[f"{target_field}__max"]
-
-            # Calcolo progressivo
-            new_number = 1
-            if last_code:
-                import re
-                digits = re.findall(r"(\d+)$", str(last_code))
-                if digits:
-                    new_number = int(digits[-1]) + 1
-
-            date = datetime.date.today()
-            loc = instance.location.name if instance.location else ""
-            part = instance.part.name if instance.part else ""
-
-            batch_code = code_format.format(
+            return code_format.format(
                 prefix=prefix,
-                num=new_number,
-                date=date,
-                loc=loc,
-                part=part,
+                num=counter,
+                date=now,
+                part=getattr(part, "name", ""),
+                loc=getattr(location, "name", ""),
+                sep=sep,
             )
-
-            setattr(instance, target_field, batch_code)
-            instance.save()
-            logger.info(f"[BatchCodePlugin] Assegnato batch {batch_code} a StockItem {instance.pk}")
-
-        except Exception as e:
-            logger.error(f"[BatchCodePlugin] Errore generazione batch: {e}")
-
-    # --- Pulsante manuale per InvenTree 1.2+ ---
-    def plugin_actions(self):
-        if not self.get_setting("MANUAL_BUTTON", True):
-            return []
-        return [
-            {
-                "name": "Generate Batch Code",
-                "description": "Genera manualmente il codice batch per questo StockItem",
-                "endpoint": "manual_batch_code",
-                "method": "POST",
-                "role": self.get_setting("MANUAL_BUTTON_ROLE", "staff")
-            }
-        ]
-
-    def manual_batch_code(self, request, stock_item):
-        """
-        Endpoint per generare batch manualmente
-        """
-        try:
-            self.on_stockitem_created(None, stock_item)
-            return {
-                "status": "success",
-                "batch_code": getattr(stock_item, self.get_setting("TARGET_FIELD", "batch"))
-            }
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+        except Exception:
+            return f"{prefix}{sep}{str(counter).zfill(min_digits)}"
 
 
-# --- Compatibilità Django signals per 1.1.3 ---
 @receiver(post_save, sender=StockItem)
-def assign_batch_code(sender, instance, created, **kwargs):
-    if created:
-        plugin = BatchCodePlugin()
-        plugin.on_stockitem_created(sender, instance)
+def batchcode_postsave(sender, instance, created, **kwargs):
+    if not created:
+        return
+
+    plugin = BatchCodePlugin()
+    if not plugin.get_setting("ENABLED", True):
+        return
+
+    code = plugin.generate_batch_code(stock_item=instance)
+    if code:
+        setattr(instance, plugin.get_setting("TARGET_FIELD", "batch"), code)
+        instance.save(update_fields=[plugin.get_setting("TARGET_FIELD", "batch")])
