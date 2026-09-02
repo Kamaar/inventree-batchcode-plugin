@@ -1,0 +1,115 @@
+msgid ""
+msgstr ""
+"POT-Creation-Date: 2025-08-05 13:54+0000\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: @lingui/cli\n"
+"Language: en\n"
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"PO-Revision-Date: \n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Plural-Forms: \n"
+
+#: src/Panel.tsx
+msgid "per part"
+msgstr "per part"
+
+#: src/Panel.tsx
+msgid "per location"
+msgstr "per location"
+
+#: src/Panel.tsx
+msgid "reset daily"
+msgstr "reset daily"
+
+#: src/Panel.tsx
+msgid "Format"
+msgstr "Format"
+
+#: src/Panel.tsx
+msgid "Prefix"
+msgstr "Prefix"
+
+#. placeholder {0}: String(settings.LOCATION_FIELD)
+#: src/Panel.tsx
+msgid "from location field '{0}'"
+msgstr "from location field '{0}'"
+
+#: src/Panel.tsx
+msgid "Counter"
+msgstr "Counter"
+
+#: src/Panel.tsx
+msgid "global"
+msgstr "global"
+
+#: src/Panel.tsx
+msgid "Trigger"
+msgstr "Trigger"
+
+#: src/Panel.tsx
+msgid "Could not load a batch code preview"
+msgstr "Could not load a batch code preview"
+
+#: src/Panel.tsx
+msgid "Batch code generated"
+msgstr "Batch code generated"
+
+#: src/Panel.tsx
+msgid "Could not generate a batch code"
+msgstr "Could not generate a batch code"
+
+#: src/Panel.tsx
+msgid "Batch code not generated"
+msgstr "Batch code not generated"
+
+#: src/Panel.tsx
+msgid "Batch code generation is disabled"
+msgstr "Batch code generation is disabled"
+
+#: src/Panel.tsx
+msgid "Enable the plugin setting 'Enabled' to generate batch codes."
+msgstr "Enable the plugin setting 'Enabled' to generate batch codes."
+
+#: src/Panel.tsx
+msgid "Current batch code"
+msgstr "Current batch code"
+
+#: src/Panel.tsx
+msgid "Not set"
+msgstr "Not set"
+
+#: src/Panel.tsx
+msgid "Next code"
+msgstr "Next code"
+
+#: src/Panel.tsx
+msgid "Preview unavailable"
+msgstr "Preview unavailable"
+
+#: src/Panel.tsx
+msgid "Overwrite the existing batch code"
+msgstr "Overwrite the existing batch code"
+
+#: src/Panel.tsx
+msgid "Refresh"
+msgstr "Refresh"
+
+#: src/Panel.tsx
+msgid "Generate and save"
+msgstr "Generate and save"
+
+#: src/Panel.tsx
+msgid "Read only"
+msgstr "Read only"
+
+#: src/Panel.tsx
+msgid "You do not have permission to generate batch codes."
+msgstr "You do not have permission to generate batch codes."
+
+#: src/Panel.tsx
+msgid "Configuration"
+msgstr "Configuration"

@@ -1,0 +1,42 @@
+# Ensure that the plugin meets the required style guidelines
+# Ensure that the plugin builds correctly
+
+name: CI Checks
+
+on: ["push", "pull_request"]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Deps
+        run: uv sync --locked
+      - name: Style Checks
+        run: |
+          uv run ruff format --check .
+          uv run ruff check .
+      - name: Build Plugin
+        run: uv run python -m build
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build Frontend
+        run: |
+          cd frontend
+          npm install
+          npm run translate
+          npm run build
+          npm run lint
