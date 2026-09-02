@@ -34,12 +34,40 @@ npm run lint:fix             # biome check --fix (also formats)
 npm run dev                  # vite dev server on :5174, pairs with INVENTREE_PLUGIN_DEV_HOST
 ```
 
-### Release ordering
+### Committed build artifacts
 
-`batchcode_plugin/static/` is gitignored, so `cd frontend && npm run build` must run **before**
-`python -m build` or the wheel ships without a UI. There is no publishing workflow — the plugin
-is not on PyPI, and `pypi.yaml` was removed from the creator's scaffold. Releases are built by
-hand, in that order.
+Unlike the creator's scaffold, `batchcode_plugin/static/` is **committed** (its `.gitignore`
+explains why): the plugin installer only accepts VCS URLs, which build from source, so an
+uncommitted bundle means no UI for anyone installing from git. `frontend/src/locales/` is
+committed for the same class of reason.
+
+So a change under `frontend/src/` is only half-done until the artifacts are rebuilt and staged:
+
+```bash
+cd frontend && npm run translate && npm run build && cd ..
+git add frontend/src/locales batchcode_plugin/static
+```
+
+The CI `frontend` job rebuilds both and fails on any difference. It stages before diffing
+(`git add -A` then `git diff --cached`) because bundle filenames carry a content hash, so a
+change *renames* files and a plain `git diff` would miss the new ones. Use `npm ci`, never
+`npm install`: several dependencies are pinned to `"latest"`, and only the lockfile keeps the
+output reproducible enough for that check.
+
+Two traps that make that check misfire, both already handled — don't undo either:
+
+- **`.gitattributes` pins everything to `eol=lf`.** A sourcemap embeds its sources verbatim in
+  `sourcesContent`, line endings included, so a CRLF checkout of `frontend/src/` builds different
+  `.js.map` files. On Windows with `core.autocrlf=true` that alone fails the check. If bundles
+  ever "change" with no source edit, compare `sourcesContent`, not `mappings`.
+- **`npm run translate` does not delete removed strings**, it marks them obsolete (`#~`). Use
+  `npx lingui extract --clean && npm run compile` after removing or renaming a UI string,
+  otherwise the catalogs accumulate dead entries.
+
+Because the bundles are committed, `python -m build` on a clean checkout already yields a
+complete wheel. There is no publishing workflow — the plugin is not on PyPI, and `pypi.yaml` was
+removed from the scaffold. `translations.yaml` was removed too: its check is now one step of the
+`frontend` job, which was already doing the same build.
 
 ## Verifying changes
 
@@ -174,8 +202,33 @@ model that does not implement it. Migrations here are hand-written (`0001_initia
 generating them with `makemigrations` requires a full InvenTree checkout. `DEFAULT_AUTO_FIELD` in
 InvenTree is plain `AutoField`, so use that, not `BigAutoField`.
 
-There is no separate server flag for app plugins in InvenTree 1.x — only `plugins_enabled` /
-`INVENTREE_PLUGINS_ENABLED`.
+### Three integrations must be switched on
+
+Beyond the server-side `plugins_enabled` / `INVENTREE_PLUGINS_ENABLED`, each mixin this plugin
+uses is gated by a **global database setting, all of which default to `False`** (defined in
+InvenTree's `common/setting/system.py`, surfaced under Settings → Plugins):
+
+| Setting | Gates | Symptom when off |
+| --- | --- | --- |
+| `ENABLE_PLUGINS_APP` | `AppMixin` | The app is never loaded; the counter table is unreachable |
+| `ENABLE_PLUGINS_URL` | `UrlsMixin` | `preview/` and `generate/` return 404 |
+| `ENABLE_PLUGINS_INTERFACE` | `UserInterfaceMixin` | No panel, no settings preview |
+
+These are *not* in `config.yaml` or `settings.py` — searching there finds nothing, which is
+misleading. When a report says "the plugin does nothing", check these before the code.
+
+### Installation cannot be completed from the web UI
+
+`plugin/installer.py` runs pip and reloads the registry; it does **not** run migrations, and
+neither does the container entrypoint (`contrib/container/init.sh` only prepares directories and
+`exec`s the command). Applying `0001_initial` needs `invoke update` (which includes `migrate`) or
+`invoke migrate` from a shell. This is an accepted consequence of the `AppMixin` design — see the
+README's install steps. If it ever needs to become UI-installable, the counter has to stop being
+a model.
+
+The installer also only accepts **VCS URLs** (`git+https://…`, composed as `{packagename}@{url}`).
+A plain `https://` URL is passed to pip as a package *index* (`-i`), so a link to a release wheel
+does not work from that form.
 
 ## Conventions
 

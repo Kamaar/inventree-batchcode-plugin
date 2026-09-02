@@ -1,5 +1,6 @@
 # Ensure that the plugin meets the required style guidelines
-# Ensure that the tests pass, and that the plugin builds correctly
+# Ensure that the tests pass, that the plugin builds, and that the committed
+# frontend artifacts match their sources
 
 name: CI Checks
 
@@ -36,10 +37,43 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Build Frontend
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # `npm ci`, not `npm install`: several dependencies are declared as
+      # "latest", so only the lockfile makes the build reproducible - and the
+      # artifact checks below depend on that.
+      - name: Install Deps
+        run: npm ci
+        working-directory: frontend
+      - name: Lint
+        run: npm run lint
+        working-directory: frontend
+      - name: Build
         run: |
-          cd frontend
-          npm install
           npm run translate
           npm run build
-          npm run lint
+        working-directory: frontend
+
+      # Both the message catalogs and the compiled bundles are committed, so a
+      # change to a source file must come with its rebuilt artifacts. Staging
+      # first, because `git diff` alone would not notice new files - and the
+      # bundle filenames carry a content hash, so they change with the content.
+      - name: Check Committed Artifacts Are Up To Date
+        run: |
+          git add -A frontend/src/locales batchcode_plugin/static
+
+          if ! git diff --cached --exit-code --stat -- frontend/src/locales; then
+            echo ""
+            echo "ERROR: Translation catalogs are out of date."
+            echo "Run 'cd frontend && npm run translate' and commit the result."
+            exit 1
+          fi
+
+          if ! git diff --cached --exit-code --stat -- batchcode_plugin/static; then
+            echo ""
+            echo "ERROR: Compiled frontend bundles are out of date."
+            echo "Run 'cd frontend && npm run build' and commit the result."
+            echo "The bundles are committed so that installing this plugin"
+            echo "from a git URL includes the user interface."
+            exit 1
+          fi
