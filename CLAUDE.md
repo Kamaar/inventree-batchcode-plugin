@@ -54,7 +54,7 @@ change *renames* files and a plain `git diff` would miss the new ones. Use `npm 
 `npm install`: several dependencies are pinned to `"latest"`, and only the lockfile keeps the
 output reproducible enough for that check.
 
-Two traps that make that check misfire, both already handled — don't undo either:
+Three traps, all already handled — don't undo any of them:
 
 - **`.gitattributes` pins everything to `eol=lf`.** The rebuild has to be byte-identical on any
   platform, and on Windows `core.autocrlf=true` would otherwise feed CRLF sources to the build.
@@ -64,6 +64,10 @@ Two traps that make that check misfire, both already handled — don't undo eith
 - **Sourcemaps are off on purpose** (`sourcemap: false`) — to narrow the race described below,
   and to make each startup reinstall cheaper. Do not re-enable them in a committed build; the
   file's own comment explains why. Note this is a mitigation, not the fix.
+
+- **`npm run translate` does not delete removed strings**, it marks them obsolete (`#~`). Use
+  `npx lingui extract --clean && npm run compile` after removing or renaming a UI string,
+  otherwise the catalogs accumulate dead entries.
 
 ### The static-collection race (an InvenTree bug, not ours)
 
@@ -82,13 +86,14 @@ Two facts combine:
 
 `PLUGIN_ON_STARTUP` ("Check plugins on startup") gates both call sites and defaults to on when
 `INVENTREE_DOCKER` is set. Turning it off is the actual fix; the README's install steps carry the
-procedure and the trade-off. When diagnosing, check whether the files are *served*
-(`fetch('/static/plugins/batchcode/Panel.js')`) rather than whether they exist on disk — they
-were verified byte-identical on disk while returning 404, because a later restart had emptied
-the directory. `tests/` cannot reach any of this.
-- **`npm run translate` does not delete removed strings**, it marks them obsolete (`#~`). Use
-  `npx lingui extract --clean && npm run compile` after removing or renaming a UI string,
-  otherwise the catalogs accumulate dead entries.
+procedure and the trade-off. `docs/upstream/inventree-issue-staticfiles-race.md` holds the full
+analysis, including why this is not a duplicate of the closed upstream #12130 (which blamed an
+external `invoke plugins`) and #7709.
+
+When diagnosing, check whether the files are *served* — `fetch('/static/plugins/batchcode/Panel.js')`
+— rather than whether they exist on disk. They were verified byte-identical on disk while
+returning 404, because a later restart had emptied the directory. `tests/` cannot reach any of
+this.
 
 Because the bundles are committed, `python -m build` on a clean checkout already yields a
 complete wheel. There is no publishing workflow — the plugin is not on PyPI, and `pypi.yaml` was

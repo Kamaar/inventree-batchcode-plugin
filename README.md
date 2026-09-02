@@ -138,6 +138,9 @@ docker compose exec inventree-server invoke static
 docker compose start inventree-worker
 ```
 
+The full analysis, written up as an upstream bug report, is in
+[`docs/upstream/`](docs/upstream/inventree-issue-staticfiles-race.md).
+
 **Trade-off.** With the setting off, plugins are no longer reinstalled
 automatically at startup. That is harmless across a restart, but a container
 *recreate* — `docker compose down && up`, or an image update — discards
