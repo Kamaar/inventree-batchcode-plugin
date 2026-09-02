@@ -138,11 +138,10 @@ docker compose exec inventree-server invoke static
 docker compose start inventree-worker
 ```
 
-Reported upstream as
-[inventree/InvenTree#12768](https://github.com/inventree/InvenTree/issues/12768);
-the full analysis is in
-[`docs/upstream/`](docs/upstream/inventree-issue-staticfiles-race.md). This step
-stays necessary until that is addressed.
+The full analysis is in
+[`docs/upstream/`](docs/upstream/inventree-issue-staticfiles-race.md), which also
+records the state of the upstream report. This step stays necessary until the
+behaviour changes in InvenTree.
 
 **Trade-off.** With the setting off, plugins are no longer reinstalled
 automatically at startup. That is harmless across a restart, but a container

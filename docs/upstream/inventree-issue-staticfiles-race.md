@@ -1,10 +1,16 @@
-> **Status:** filed upstream as
+> **Status: not currently filed upstream.**
 > [inventree/InvenTree#12768](https://github.com/inventree/InvenTree/issues/12768)
-> on 2 September 2026. Follow that issue for whether the behaviour changes; until
-> it does, the `PLUGIN_ON_STARTUP` workaround in the README install steps stands.
+> was opened on 2 September 2026 without going through the repository's issue
+> form, and was closed unread for that reason. Refiling means using the bug
+> template at
+> <https://github.com/inventree/InvenTree/issues/new/choose>, which asks for
+> steps to reproduce, expected behaviour, deployment method, a version block and
+> the log output separately — the API cannot submit an issue form, so it has to
+> be done in the browser.
 >
-> Kept here because those install steps ask users to turn a setting off, and this
-> is the analysis that justifies it.
+> Until the behaviour changes upstream, the `PLUGIN_ON_STARTUP` workaround in
+> the README install steps stands. Kept here because those steps ask users to
+> turn a setting off, and this is the analysis that justifies it.
 
 # Plugin static file collection races between processes, leaving the static directory half populated
 
