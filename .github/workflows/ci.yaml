@@ -1,12 +1,12 @@
 # Ensure that the plugin meets the required style guidelines
-# Ensure that the plugin builds correctly
+# Ensure that the tests pass, and that the plugin builds correctly
 
 name: CI Checks
 
 on: ["push", "pull_request"]
 
 jobs:
-  ci:
+  backend:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -15,12 +15,15 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+      # Honours .python-version
       - name: Install Deps
         run: uv sync --locked
       - name: Style Checks
         run: |
           uv run ruff format --check .
           uv run ruff check .
+      - name: Tests
+        run: uv run pytest
       - name: Build Plugin
         run: uv run python -m build
 
