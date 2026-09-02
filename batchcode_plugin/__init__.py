@@ -1,2 +1,3 @@
-# file: batchcode_plugin/__init__.py
-# Può rimanere vuoto, serve solo per definire il pacchetto
+"""BatchCodePlugin - progressive batch code generation for InvenTree."""
+
+PLUGIN_VERSION = '2.0.0'
