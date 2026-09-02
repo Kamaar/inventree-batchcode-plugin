@@ -56,10 +56,36 @@ output reproducible enough for that check.
 
 Two traps that make that check misfire, both already handled — don't undo either:
 
-- **`.gitattributes` pins everything to `eol=lf`.** A sourcemap embeds its sources verbatim in
-  `sourcesContent`, line endings included, so a CRLF checkout of `frontend/src/` builds different
-  `.js.map` files. On Windows with `core.autocrlf=true` that alone fails the check. If bundles
-  ever "change" with no source edit, compare `sourcesContent`, not `mappings`.
+- **`.gitattributes` pins everything to `eol=lf`.** The rebuild has to be byte-identical on any
+  platform, and on Windows `core.autocrlf=true` would otherwise feed CRLF sources to the build.
+  This first surfaced through sourcemaps, which embed their sources verbatim in
+  `sourcesContent` — they are no longer shipped, but the catalogs are compared the same way.
+
+- **Sourcemaps are off on purpose** (`sourcemap: false`) — to narrow the race described below,
+  and to make each startup reinstall cheaper. Do not re-enable them in a committed build; the
+  file's own comment explains why. Note this is a mitigation, not the fix.
+
+### The static-collection race (an InvenTree bug, not ours)
+
+Worth recognising, because the symptom points at this plugin and the cause is not here. The
+plugin's bundles 404 under `/static/plugins/batchcode/` while `/static/` otherwise works, the
+UI shows *Error Loading Plugin Content*, and the error log carries `OSError: Directory not
+empty` and `FileNotFoundError` from `plugin/staticfiles.py`.
+
+Two facts combine:
+
+- `registry.install_plugin_file()` guards itself with `settings.PLUGIN_FILE_HASH`, a plain
+  in-memory attribute initialised to `''`. So the guard never dedupes across processes: every
+  server and worker process runs the installer on every start.
+- `copy_plugin_static_files()` clears a plugin's static directory and then re-copies it, with no
+  lock. Concurrent runs interleave, and a lost race can leave the directory **empty**.
+
+`PLUGIN_ON_STARTUP` ("Check plugins on startup") gates both call sites and defaults to on when
+`INVENTREE_DOCKER` is set. Turning it off is the actual fix; the README's install steps carry the
+procedure and the trade-off. When diagnosing, check whether the files are *served*
+(`fetch('/static/plugins/batchcode/Panel.js')`) rather than whether they exist on disk — they
+were verified byte-identical on disk while returning 404, because a later restart had emptied
+the directory. `tests/` cannot reach any of this.
 - **`npm run translate` does not delete removed strings**, it marks them obsolete (`#~`). Use
   `npx lingui extract --clean && npm run compile` after removing or renaming a UI string,
   otherwise the catalogs accumulate dead entries.
@@ -141,9 +167,24 @@ database (`seed_value()`, gated by the `SEED_FROM_EXISTING` setting). It exists 
 1.x — where the counter was recomputed from the stock table each time — does not reissue codes
 already in use.
 
-Counter values are consumed at generation time, not when the stock item is saved, so abandoned
-forms leave gaps. Codes are unique and increasing, **not** gapless. Don't "fix" this without
-changing the model to reserve-and-confirm.
+**`seed_value()` must only read codes the current format could have produced.** Batch codes are
+also typed in by hand: supplier and manufacturer lot numbers live in the same field. An earlier
+version took the trailing digits of any code, so a lot number of `297010012544000` — a real one,
+found on a live instance — would have driven the counter to `297010012544001` permanently, with
+the setting on by default. `code_pattern()` renders the format with `SEED_SENTINEL` in place of
+the counter and swaps the sentinel for a digit group, so the surrounding text is matched
+literally against the same date, part and location being generated for. It also yields the
+literal prefix, used as a `batch__startswith` filter to keep the query selective. A format with
+no `{num}` (or more than one) yields no pattern and seeding is skipped rather than guessed at.
+`render_code(..., truncate=False)` exists for this: clipping to 100 characters would cut the text
+after the counter out of the pattern. `tests/test_seeding.py` covers it.
+
+Counter values are consumed at generation time, not when the stock item is saved, so gaps are
+normal — and bigger than they look. `StockItem.batch` is declared with
+`default=generate_batch_code`, and Django evaluates field defaults when a model instance is
+*constructed*, so merely opening the stock creation form burns a value. One instance reached 16
+before a code had been deliberately generated. Codes are unique and increasing, **not** gapless;
+don't "fix" that without changing the model to reserve-and-confirm.
 
 ### Settings
 
@@ -178,6 +219,23 @@ The working pattern is the `LazyModelField` subclasses: drop the `queryset` kwar
 settings page (`ADMIN_SOURCE`). Both are wired by name — `'Panel.js:RenderBatchCodePluginPanel'`
 and `'Settings.js:RenderPluginSettings'` — so renaming an exported function requires updating
 `core.py` too.
+
+Two traps that already bit once here:
+
+- **Never hand `get_settings_dict()` to the frontend.** It returns
+  `PluginSetting.value` verbatim — the raw database string — so a boolean arrives as `'False'`,
+  and every non-empty string is truthy in JavaScript. Keys with no stored row come back as their
+  Python default instead, so the dict mixes types. `settings_for_ui()` maps `get_setting()` over
+  `SETTINGS`, which applies each declared validator. `tests/test_permissions.py` asserts the
+  panel context carries real booleans, and `conftest.py` deliberately reproduces InvenTree's
+  stringly-typed behaviour so the test can fail — an earlier stub returned typed values, was
+  more correct than reality, and hid this bug.
+- **Lingui messages are ICU, where `'` escapes braces.** `` t`field '${x}'` `` compiles to the
+  message `field '{0}'`, which renders as the literal text `field {0}` with the quotes
+  swallowed. Leave interpolations unquoted. A quote not adjacent to `{`, `}` or `#` is fine, so
+  `` t`the 'Enabled' setting` `` is safe. To check a compiled message, look at
+  `batchcode_plugin/static/assets/messages-*.js`: a working placeholder appears as a structured
+  `["text ",["0"]]`, a broken one as plain text.
 
 The dict returned in a panel's `context` key arrives as **`context.context`** in the component
 (`context.instance` is the stock item, `context.reloadInstance()` refetches it). React, Mantine,

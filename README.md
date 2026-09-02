@@ -4,7 +4,7 @@ Generate progressive batch codes for InvenTree `StockItem` records, with a
 configurable format and persistent per-part / per-location counters.
 
 - **Author:** Simone Amadori
-- **Plugin version:** 2.0.0
+- **Plugin version:** 2.0.1
 - **Requires:** InvenTree 1.0.0 or newer (developed against 1.5.2)
 
 ---
@@ -47,14 +47,14 @@ In **Settings → Plugins → Install Plugin**, fill in:
 | Field | Value |
 | --- | --- |
 | Package name | `inventree-batchcode-plugin` |
-| Source URL | `git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.0` |
+| Source URL | `git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.1` |
 
-Drop the `@v2.0.0` to follow the default branch instead of a fixed release.
+Drop the `@v2.0.1` to follow the default branch instead of a fixed release.
 
 Equivalently, from a shell in the InvenTree environment:
 
 ```bash
-pip install -U git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.0
+pip install -U git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.1
 ```
 
 Note that a plain `https://` URL is not an alternative here: InvenTree passes
@@ -102,6 +102,54 @@ Open any stock item — there should be a **Batch Code** panel showing the
 current code and a preview of the next one. If the panel is missing, revisit
 step 3; if it loads but reports an error, the migration in step 4 has not run.
 
+### 5. On Docker, turn off "Check plugins on startup"
+
+Not optional in practice, and worth doing before you hit the problem it avoids.
+
+**Symptom.** The panel shows *Error Loading Plugin Content — Failed to load
+module: …/static/plugins/batchcode/Panel-…js*, and the plugin's static files
+return 404 even though they exist inside the container. The error log also
+carries `OSError: [Errno 39] Directory not empty` and `FileNotFoundError` from
+`plugin/staticfiles.py`.
+
+**Cause, in InvenTree rather than in this plugin.** `registry.install_plugin_file()`
+is guarded by a hash held in `settings.PLUGIN_FILE_HASH`, which is a plain
+in-memory attribute initialised to `''`. Every process therefore sees a
+mismatch on every start and runs the installer, which ends by calling
+`collect_plugins_static_files()`. That function clears a plugin's static
+directory and *then* re-copies it, with no locking. With a server plus
+django-q workers, several processes do this simultaneously on every restart,
+and a lost race can leave the directory empty — so the bundles 404 and no
+panel renders. `PLUGIN_ON_STARTUP` defaults to on whenever `INVENTREE_DOCKER`
+is set, which is the case for the official images.
+
+**Fix.** In Settings → Plugins, turn off **Check plugins on startup**, then
+restart (the setting is marked `requires_restart`). Both call sites of
+`install_plugin_file()` are behind that gate, so nothing races any more.
+Installing or updating a plugin from the web interface still collects static
+files — as a single web request, in one process.
+
+Then re-collect once, with the worker stopped so nothing competes:
+
+```bash
+docker compose stop inventree-worker
+docker compose exec inventree-server rm -rf /home/inventree/data/static/plugins/batchcode
+docker compose exec inventree-server invoke static
+docker compose start inventree-worker
+```
+
+**Trade-off.** With the setting off, plugins are no longer reinstalled
+automatically at startup. That is harmless across a restart, but a container
+*recreate* — `docker compose down && up`, or an image update — discards
+anything pip installed into the container filesystem. If your deployment does
+not set `INVENTREE_PY_ENV` to a path inside the data volume, plugins live in
+the container layer and will need reinstalling from the web interface after an
+image update. Check with:
+
+```bash
+docker compose exec inventree-server sh -c 'echo "${INVENTREE_PY_ENV:-not set}"'
+```
+
 ## Configuration
 
 All settings live under Settings → Plugins → Batch Code Generator.
@@ -119,7 +167,7 @@ All settings live under Settings → Plugins → Batch Code Generator.
 | `USE_LOCATION_PREFIX` | `false` | Use a stock location field as the prefix |
 | `LOCATION_FIELD` | `name` | Which location field: `name`, `pathstring` or `description` |
 | `TRIGGER_MODE` | `always` | `always`, `on_receive` (purchase order receipts only) or `manual` |
-| `SEED_FROM_EXISTING` | `true` | Raise the counter past numbers already present in existing batch codes |
+| `SEED_FROM_EXISTING` | `true` | Raise the counter past numbers already used by codes the current format would produce |
 | `MANUAL_BUTTON` | `true` | Show the generate button in the stock item panel |
 | `MANUAL_BUTTON_ROLE` | `staff` | Who may generate manually: `all`, `staff` or `superuser` |
 
@@ -142,6 +190,16 @@ All settings live under Settings → Plugins → Batch Code Generator.
 A bare `{num}` inherits the `MIN_DIGITS` padding. If the format supplies its
 own padding — `{num:06d}` — that wins and `MIN_DIGITS` is ignored.
 
+Two things to watch when composing a format:
+
+- **`{prefix}` is not implicit.** `PREFIX` only appears if the format contains
+  the placeholder, so `{date:%Y%m%d}{sep}{num:04d}` silently drops it.
+- **Pair `%V` with `%G`, not `%Y`.** `%V` is the ISO week number and `%G` the
+  ISO week-numbering year, and they diverge at the turn of the year:
+  31 December 2026 falls in ISO week 1 of 2027, so `{date:%Y%V}` renders
+  `202601` where `{date:%G%V}` correctly renders `202701`. Mixing them puts
+  codes out of sequence for a few days each January.
+
 If the format string is invalid the plugin logs a warning and falls back to
 `{prefix}{sep}{num}`, rather than failing the stock operation. Codes are
 truncated to 100 characters, the maximum length of `StockItem.batch`.
@@ -153,9 +211,37 @@ With all three off there is one global sequence; with `PER_PART` on, each part
 gets its own. The scopes are visible in the Django admin interface under
 *Batch Counters*, where a sequence can also be inspected or reset by hand.
 
+### Gaps in the sequence are normal
+
 Counter values are consumed when a code is **generated**, not when the stock
-item is saved. Abandoning a part-filled stock form therefore leaves a gap in
-the sequence. Codes are guaranteed unique and increasing, not gapless.
+item is saved. Codes are guaranteed unique and increasing, **not gapless**, and
+the gaps are larger than they first look.
+
+`StockItem.batch` is declared in InvenTree with `default=generate_batch_code`,
+and Django evaluates a field default whenever a model instance is
+*constructed*, not when it is saved. So a value is consumed by opening the
+stock creation form (InvenTree pre-fills the field through
+`/api/stock/generate/batch-code/`) even if you cancel, by stock splits and
+transfers that create new rows, and by anything else that instantiates a
+`StockItem` without an explicit batch. On one instance the counter reached 16
+before a single batch code had been deliberately generated.
+
+If that matters, the counter is editable: Django admin → *Batch Counters* →
+set *Value* to whatever the next code should follow.
+
+### What counts as an existing code
+
+`SEED_FROM_EXISTING` raises the counter above numbers already in use, so an
+upgrade cannot reissue a code. It only considers codes **the current format
+would have produced**: the format is rendered with a sentinel in place of the
+counter, and only codes matching that shape — same prefix, same date, same
+separator — are read.
+
+This matters because batch codes are also typed in by hand. A supplier lot
+number like `297010012544000` sitting in the stock table would otherwise be
+read as a counter value and drive the sequence to `297010012544001`,
+permanently. Codes from another day or week, or with a different prefix, are
+ignored for the same reason.
 
 ## API
 
@@ -228,10 +314,16 @@ out with:
 cd frontend && npx lingui extract --clean && npm run compile && npm run build
 ```
 
-Line endings are pinned to LF by `.gitattributes`, and this matters more than
-it looks: a sourcemap embeds its sources verbatim, so a CRLF checkout of
-`frontend/src/` produces different `.js.map` files and the CI check above would
-fail on Windows for no real reason.
+Line endings are pinned to LF by `.gitattributes` so that a checkout on Windows
+builds the same bytes as one on Linux, and the CI check above does not fail for
+no real reason.
+
+**Sourcemaps are off** (`sourcemap: false` in `frontend/vite.config.ts`), which
+keeps the shipped bundle at 15 files and 156 KB rather than 29 files and
+752 KB. The reason is not repository tidiness — see the comment in that file:
+InvenTree copies these files into its static directory with no locking, and
+several processes do it at once, so a smaller payload means a narrower race
+window. Re-enable them only for local debugging, and do not commit the result.
 
 Nothing under `batchcode_plugin/static/` should ever be edited by hand.
 
@@ -304,6 +396,35 @@ Breaking and behavioural changes:
   in `CODE_FORMAT` instead.
 
 ## Changelog
+
+### 2.0.1
+- **Fixed `SEED_FROM_EXISTING` reading unrelated numbers.** It took the
+  trailing digits of *any* batch code, including hand-entered supplier lot
+  numbers. A lot number of `297010012544000` in the stock table would have
+  driven the counter to `297010012544001` and never recovered — with the
+  setting on by default, on exactly the databases it exists to protect. It now
+  matches codes against a pattern derived from the current format, so only
+  codes the plugin itself could have produced are considered.
+- **Fixed the panel misreporting the configuration.** It showed every counter
+  scope as active — *"per part, per location, reset daily"* — with all three
+  switched off, and took the location-prefix branch when that was off too.
+  `get_settings_dict()` returns `PluginSetting.value` verbatim, i.e. the raw
+  database string, so booleans arrived as `'False'`, and every non-empty string
+  is truthy in JavaScript. The panel context is now built with `get_setting()`,
+  which applies the declared validator and yields real booleans and integers.
+- **Fixed the location-prefix label** rendering as `from location field {0}`.
+  Lingui messages are ICU, where a single quote escapes braces, so writing the
+  placeholder as `'{0}'` made it literal text and swallowed the quotes.
+- Documented the InvenTree behaviour that stops the plugin's UI loading on
+  Docker, and how to switch it off — see *On Docker, turn off "Check plugins on
+  startup"* in the install steps. Short version: `PLUGIN_FILE_HASH` is
+  process-local, so every process reruns the plugin installer on every start,
+  and the unlocked clear-then-copy in `plugin/staticfiles.py` can leave the
+  plugin's static directory empty. Turning off `PLUGIN_ON_STARTUP` removes the
+  concurrency; nothing in this plugin could fix it.
+- Stopped shipping sourcemaps: 15 files and 156 KB instead of 29 and 752 KB.
+  This narrows the same race and makes each startup reinstall cheaper, but it
+  is not what fixes the problem — the setting above is.
 
 ### 2.0.0
 - Restructured onto the official InvenTree plugin creator template

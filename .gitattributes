@@ -3,10 +3,10 @@
 # CRLF working copies.
 #
 # This is not cosmetic. The compiled bundles in batchcode_plugin/static/ are
-# committed, and a sourcemap embeds its sources verbatim in "sourcesContent",
-# line endings included. A CRLF checkout of frontend/src therefore builds
-# different .js.map files than a LF one, which would make the CI check for
-# up-to-date artifacts fail on Windows even when nothing had changed.
+# committed and CI fails if a rebuild does not reproduce them, so the build
+# has to be byte-identical whatever platform it runs on. Sourcemaps made this
+# acute - they embed their sources verbatim, line endings included - and are
+# no longer shipped, but the message catalogs are compared the same way.
 * text=auto eol=lf
 
 # Generated artifacts: never transform them, so they stay byte-identical to

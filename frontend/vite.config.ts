@@ -44,7 +44,22 @@ export default defineConfig({
     target: 'esnext',
     cssCodeSplit: false,
     manifest: true,
-    sourcemap: true,
+    // Sourcemaps are deliberately off. This is a mitigation, not a fix - the
+    // real remedy is turning off InvenTree's PLUGIN_ON_STARTUP setting, see
+    // the install steps in README.md.
+    //
+    // The bundles are committed and copied into InvenTree's static directory
+    // by plugin/staticfiles.py, which clears the destination and re-copies it
+    // with no locking at all. Every server and worker process runs that on
+    // every start, because the guard in registry.install_plugin_file() keeps
+    // its hash in a process-local settings attribute, so they race:
+    // `os.rmdir` fails with "Directory not empty", and `os.chmod` fails with
+    // "No such file or directory" because another process deleted the file
+    // between creation and chmod. The race window scales with how many files
+    // and bytes get written, and the maps were 14 of 29 files and 79% of the
+    // bytes. Dropping them does not fix the upstream bug, but it shrinks the
+    // exposure considerably.
+    sourcemap: false,
     rollupOptions: {
       preserveEntrySignatures: "exports-only",
       input: [

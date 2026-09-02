@@ -35,8 +35,8 @@ msgstr "Prefix"
 
 #. placeholder {0}: String(settings.LOCATION_FIELD)
 #: src/Panel.tsx
-msgid "from location field '{0}'"
-msgstr "from location field '{0}'"
+msgid "from location field {0}"
+msgstr "from location field {0}"
 
 #: src/Panel.tsx
 msgid "Counter"

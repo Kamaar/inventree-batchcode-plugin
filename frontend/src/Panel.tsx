@@ -44,7 +44,10 @@ function SettingsSummary({ settings }: { settings: BatchCodeSettings }) {
       [
         t`Prefix`,
         settings.USE_LOCATION_PREFIX
-          ? t`from location field '${String(settings.LOCATION_FIELD)}'`
+          ? // No quotes around the placeholder: lingui messages are ICU, where
+            // single quotes escape braces, so '{0}' renders as a literal "{0}"
+            // with the quotes swallowed.
+            t`from location field ${String(settings.LOCATION_FIELD)}`
           : String(settings.PREFIX ?? '')
       ],
       [t`Counter`, scopes.length ? scopes.join(', ') : t`global`],

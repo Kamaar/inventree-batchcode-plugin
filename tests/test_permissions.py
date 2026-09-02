@@ -81,6 +81,48 @@ def test_panel_settings_cover_what_the_frontend_reads(plugin):
         assert key in settings
 
 
+@pytest.mark.parametrize(
+    'key',
+    [
+        'ENABLED',
+        'DAILY_RESET',
+        'PER_PART',
+        'PER_LOCATION',
+        'USE_LOCATION_PREFIX',
+        'MANUAL_BUTTON',
+        'SEED_FROM_EXISTING',
+    ],
+)
+def test_panel_booleans_are_real_booleans(plugin, key):
+    """Every JavaScript string is truthy, including 'False'.
+
+    SettingsMixin.get_settings_dict() hands back the raw database value, so
+    passing it straight to the frontend made the panel report every counter
+    scope as enabled. The panel context must carry typed values.
+    """
+    settings = _panels(plugin(), 'stockitem')[0]['context']['settings']
+
+    assert isinstance(settings[key], bool), (
+        f'{key} is {settings[key]!r} ({type(settings[key]).__name__}); '
+        'a string would be truthy in the panel'
+    )
+
+
+def test_panel_min_digits_is_numeric(plugin):
+    settings = _panels(plugin(), 'stockitem')[0]['context']['settings']
+    assert isinstance(settings['MIN_DIGITS'], int)
+
+
+def test_panel_reflects_disabled_scopes(plugin):
+    """With every scope off, the panel must not be told they are on."""
+    settings = _panels(plugin(), 'stockitem')[0]['context']['settings']
+
+    assert settings['PER_PART'] is False
+    assert settings['PER_LOCATION'] is False
+    assert settings['DAILY_RESET'] is False
+    assert settings['USE_LOCATION_PREFIX'] is False
+
+
 def test_panel_reports_permission_per_user(plugin):
     p = plugin(MANUAL_BUTTON_ROLE='superuser')
 

@@ -10,6 +10,7 @@ are replaced with an in-memory store, while `build_key` is delegated to the
 real implementation so the tests cannot drift from the production scope key.
 """
 
+import ast
 import datetime
 import importlib.util
 import pathlib
@@ -40,6 +41,51 @@ def _configure_django() -> None:
     django.setup()
 
 
+class FakeStockQuerySet:
+    """Stands in for `StockItem.objects`, as far as `seed_value` uses it.
+
+    Holds the batch codes that already exist in the database. Tests set them
+    through the `existing_codes` fixture; the class attribute is read lazily so
+    a test can change it long after the stub module was built.
+
+    `batch__startswith` is honoured because `seed_value` leans on it to keep
+    the query selective; the other filters are no-ops here.
+    """
+
+    codes: list = []
+
+    def __init__(self, prefix: str = ''):
+        """Narrow to codes starting with `prefix`."""
+        self._prefix = prefix
+
+    def _matching(self) -> list:
+        return [c for c in type(self).codes if str(c).startswith(self._prefix)]
+
+    def all(self):
+        """Return self, as a queryset would."""
+        return self
+
+    def exclude(self, **kwargs):
+        """Ignore exclusions; the stub holds only non-empty codes."""
+        return self
+
+    def filter(self, **kwargs):
+        """Apply `batch__startswith`, ignore the rest."""
+        return type(self)(kwargs.get('batch__startswith', self._prefix))
+
+    def order_by(self, *args):
+        """Ordering does not matter: seed_value takes a Python maximum."""
+        return self
+
+    def values_list(self, *args, **kwargs):
+        """Return self; the slice below yields the codes."""
+        return self
+
+    def __getitem__(self, item):
+        """Slice the matching codes, as `values_list(...)[:n]` does."""
+        return self._matching()[item]
+
+
 def _install_inventree_stubs() -> None:
     """Register fake `plugin`, `InvenTree` and `stock` modules."""
     plugin_mod = types.ModuleType('plugin')
@@ -66,8 +112,18 @@ def _install_inventree_stubs() -> None:
         """Stand-in exposing the settings helpers the plugin relies on."""
 
         def get_settings_dict(self) -> dict:
-            """Return {key: value} for every declared setting."""
-            return {key: self.get_setting(key) for key in self.SETTINGS}
+            """Mirror the real mixin, warts included.
+
+            InvenTree returns `PluginSetting.value` verbatim - the raw database
+            string - for any setting with a stored row, and the Python default
+            for the rest. So booleans arrive as `'True'` / `'False'`, which are
+            both truthy in JavaScript.
+
+            Reproducing that here on purpose: an earlier version of this stub
+            returned properly typed values, which was more correct than
+            reality and hid a real bug in the panel context.
+            """
+            return {key: str(self.get_setting(key)) for key in self.SETTINGS}
 
     mixins_mod.SettingsMixin = SettingsMixin
 
@@ -82,32 +138,10 @@ def _install_inventree_stubs() -> None:
     sys.modules['InvenTree'] = inventree_mod
     sys.modules['InvenTree.helpers'] = helpers_mod
 
-    # stock.models.StockItem is only reached by seed_value, which the tests
-    # either bypass (SEED_FROM_EXISTING off) or override; this queryset stub
-    # simply yields no existing codes.
-    class _EmptyQuerySet:
-        def all(self):
-            return self
-
-        def exclude(self, **kwargs):
-            return self
-
-        def filter(self, **kwargs):
-            return self
-
-        def order_by(self, *args):
-            return self
-
-        def values_list(self, *args, **kwargs):
-            return self
-
-        def __getitem__(self, item):
-            return []
-
     stock_mod = types.ModuleType('stock')
     stock_models = types.ModuleType('stock.models')
-    stock_models.StockItem = SimpleNamespace(objects=_EmptyQuerySet())
-    stock_models.StockLocation = SimpleNamespace(objects=_EmptyQuerySet())
+    stock_models.StockItem = SimpleNamespace(objects=FakeStockQuerySet())
+    stock_models.StockLocation = SimpleNamespace(objects=FakeStockQuerySet())
     stock_mod.models = stock_models
     sys.modules['stock'] = stock_mod
     sys.modules['stock.models'] = stock_models
@@ -115,7 +149,7 @@ def _install_inventree_stubs() -> None:
     # part.models is imported by serializers.py, not by core.py
     part_mod = types.ModuleType('part')
     part_models = types.ModuleType('part.models')
-    part_models.Part = SimpleNamespace(objects=_EmptyQuerySet())
+    part_models.Part = SimpleNamespace(objects=FakeStockQuerySet())
     part_mod.models = part_models
     sys.modules['part'] = part_mod
     sys.modules['part.models'] = part_models
@@ -157,15 +191,31 @@ class InMemoryCounter:
         return value
 
 
+def _plugin_version() -> str:
+    """Read PLUGIN_VERSION out of the real package, without importing it."""
+    source = (ROOT / 'batchcode_plugin' / '__init__.py').read_text(encoding='utf-8')
+
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if getattr(target, 'id', None) == 'PLUGIN_VERSION':
+                    return node.value.value
+
+    raise RuntimeError('PLUGIN_VERSION not found in batchcode_plugin/__init__.py')
+
+
 def _bootstrap():
     """Load the real models and core modules, with persistence faked."""
     _configure_django()
     _install_inventree_stubs()
 
-    # A package placeholder, so 'from . import PLUGIN_VERSION' resolves
+    # A package placeholder, so 'from . import PLUGIN_VERSION' resolves.
+    # The version is read from the real __init__.py rather than repeated here:
+    # duplicating it would make test_version_comes_from_a_single_source compare
+    # this file against itself and drift on every release.
     package = types.ModuleType('batchcode_plugin')
     package.__path__ = [str(ROOT / 'batchcode_plugin')]
-    package.PLUGIN_VERSION = '2.0.0'
+    package.PLUGIN_VERSION = _plugin_version()
     sys.modules['batchcode_plugin'] = package
 
     real_models = _load_module(
@@ -209,10 +259,22 @@ class PluginUnderTest(CORE.BatchCodePlugin):
 
 @pytest.fixture(autouse=True)
 def _clear_counters():
-    """Give every test an empty counter store."""
+    """Give every test an empty counter store and no existing batch codes."""
     InMemoryCounter.reset()
+    FakeStockQuerySet.codes = []
     yield
     InMemoryCounter.reset()
+    FakeStockQuerySet.codes = []
+
+
+@pytest.fixture
+def existing_codes():
+    """Set the batch codes already present in the database."""
+
+    def _set(*codes):
+        FakeStockQuerySet.codes = list(codes)
+
+    return _set
 
 
 @pytest.fixture

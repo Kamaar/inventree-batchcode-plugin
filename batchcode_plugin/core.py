@@ -26,11 +26,13 @@ from .models import BATCH_CODE_MAX_LENGTH, BatchCounter
 
 logger = logging.getLogger('inventree')
 
-# Trailing digit group of an existing batch code, used to seed counters
-TRAILING_NUMBER = re.compile(r'(\d+)$')
-
 # A bare '{num}' placeholder, to which MIN_DIGITS padding is applied
 BARE_NUM = re.compile(r'\{num\}')
+
+# Stand-in for the counter when deriving a match pattern from CODE_FORMAT.
+# Distinctive enough not to collide with a rendered date or name, and wide
+# enough that a padding spec such as {num:04d} leaves it intact.
+SEED_SENTINEL = 987654321
 
 
 class BatchCodePlugin(
@@ -152,7 +154,8 @@ class BatchCodePlugin(
             'name': _('Seed from existing codes'),
             'description': _(
                 'Before issuing a code, raise the counter past any higher number '
-                'already present in existing batch codes. Keep enabled when '
+                'already used by a code the current format would have produced. '
+                'Hand-entered supplier lot numbers are ignored. Keep enabled when '
                 'upgrading from plugin version 1.x'
             ),
             'validator': bool,
@@ -206,14 +209,52 @@ class BatchCodePlugin(
 
         return scope
 
-    def seed_value(self, scope: dict) -> int:
-        """Highest number already used by existing batch codes in this scope.
+    def code_pattern(self, prefix: str, **kwargs):
+        """Return (regex, literal_prefix) matching codes this format produces.
+
+        Seeding must not read the trailing digits of *any* batch code. Batch
+        codes are also typed in by hand - supplier and manufacturer lot numbers
+        like ``297010012544000`` are normal - and treating those as counter
+        values catapults the sequence somewhere it can never come back from.
+
+        So the shape of a generated code is derived from the format itself: it
+        is rendered once with a sentinel in place of the counter, and the
+        sentinel is swapped for a digit group. Everything around it is matched
+        literally, against the same date, part and location the caller is
+        generating for.
+
+        Returns (None, '') when no pattern can be derived - a format with no
+        ``{num}``, or with more than one - in which case seeding is skipped
+        rather than guessed at.
+        """
+        rendered = self.render_code(prefix, SEED_SENTINEL, truncate=False, **kwargs)
+
+        sentinel = str(SEED_SENTINEL)
+
+        if rendered.count(sentinel) != 1:
+            return None, ''
+
+        head, tail = rendered.split(sentinel)
+
+        pattern = re.compile(f'{re.escape(head)}(\\d+){re.escape(tail)}$')
+
+        return pattern, head
+
+    def seed_value(self, scope: dict, **kwargs) -> int:
+        """Highest counter value already present in matching batch codes.
 
         Guards against reissuing codes which predate the persistent counter -
         for instance after upgrading from plugin version 1.x, where the counter
         was derived from the stock table on every call.
         """
         if not self.get_setting('SEED_FROM_EXISTING'):
+            return 0
+
+        pattern, literal_prefix = self.code_pattern(
+            self.resolve_prefix(kwargs.get('location')), **kwargs
+        )
+
+        if pattern is None:
             return 0
 
         from stock.models import StockItem
@@ -226,18 +267,20 @@ class BatchCodePlugin(
         if scope.get('location'):
             items = items.filter(location=scope['location'])
 
-        if scope.get('period'):
-            items = items.filter(batch__contains=scope['period'])
+        # The literal part of the pattern is usually selective on its own -
+        # a date-based format narrows this to the current day or week
+        if literal_prefix:
+            items = items.filter(batch__startswith=literal_prefix)
 
-        # Only recent codes can plausibly hold the highest counter, and the
-        # number is not necessarily sortable as a string - so scan a window of
-        # recent codes and take the true maximum of their trailing digits.
-        codes = items.order_by('-pk').values_list('batch', flat=True)[:250]
+        # A counter is not sortable as a string, so the maximum has to be taken
+        # in Python. The window bounds the work; the filters above should
+        # already have cut this down to the codes of the current period.
+        codes = items.order_by('-pk').values_list('batch', flat=True)[:1000]
 
         best = 0
 
         for code in codes:
-            match = TRAILING_NUMBER.search(str(code))
+            match = pattern.match(str(code))
             if match:
                 best = max(best, int(match.group(1)))
 
@@ -269,8 +312,23 @@ class BatchCodePlugin(
             'week': kwargs.get('week', ''),
         }
 
-    def render_code(self, prefix: str, number: int, **kwargs) -> str:
-        """Render CODE_FORMAT for the given prefix and counter value."""
+    def render_code(
+        self, prefix: str, number: int, truncate: bool = True, **kwargs
+    ) -> str:
+        """Render CODE_FORMAT for the given prefix and counter value.
+
+        Args:
+            prefix: Prefix to substitute for ``{prefix}``.
+            number: Counter value to substitute for ``{num}``.
+            truncate: Clip the result to the length of ``StockItem.batch``.
+                Off when deriving a match pattern, where clipping would cut
+                the part of the code that follows the counter.
+            **kwargs: Generation context, as described in
+                :meth:`generate_batch_code`.
+
+        Returns:
+            The rendered batch code.
+        """
         fmt = self.get_setting('CODE_FORMAT') or '{prefix}{sep}{num}'
         min_digits = int(self.get_setting('MIN_DIGITS') or 4)
 
@@ -289,7 +347,9 @@ class BatchCodePlugin(
             )
             code = f'{prefix}{context["sep"]}{str(number).zfill(min_digits)}'
 
-        return code.strip()[:BATCH_CODE_MAX_LENGTH]
+        code = code.strip()
+
+        return code[:BATCH_CODE_MAX_LENGTH] if truncate else code
 
     # ------------------------------------------------------------------
     # Generation
@@ -351,7 +411,15 @@ class BatchCodePlugin(
 
         scope = self.counter_scope(part=part, location=location, date=date)
         key = BatchCounter.build_key(**scope)
-        seed = self.seed_value(scope)
+        seed = self.seed_value(
+            scope,
+            part=part,
+            location=location,
+            date=date,
+            **{
+                k: v for k, v in kwargs.items() if k not in ('part', 'location', 'date')
+            },
+        )
 
         if commit:
             number = BatchCounter.advance(key, seed=seed, **scope)
@@ -434,6 +502,20 @@ class BatchCodePlugin(
 
         return True
 
+    def settings_for_ui(self) -> dict:
+        """Return every plugin setting, correctly typed.
+
+        Not `get_settings_dict()`: that returns `PluginSetting.value` verbatim,
+        which is the raw database string, so a boolean comes back as `'False'`
+        - and `'False'` is truthy in JavaScript, which had the panel reporting
+        every counter scope as enabled. Keys with no stored row come back as
+        their Python default instead, so the dict is a mix of types.
+
+        `get_setting()` applies the validator declared in SETTINGS, so the
+        frontend receives real booleans and integers.
+        """
+        return {key: self.get_setting(key) for key in self.SETTINGS}
+
     def get_ui_panels(self, request, context: dict, **kwargs):
         """Return the batch code panel, for stock item detail pages."""
         if context.get('target_model') != 'stockitem':
@@ -449,7 +531,7 @@ class BatchCodePlugin(
                     'Panel.js:RenderBatchCodePluginPanel'
                 ),
                 'context': {
-                    'settings': self.get_settings_dict(),
+                    'settings': self.settings_for_ui(),
                     'can_generate': self.user_can_generate(request.user),
                 },
             }

@@ -79,21 +79,24 @@ def test_preview_does_not_consume_a_value(plugin, now):
     assert p.build_code(date=now) == 'B-0002'
 
 
-def test_seed_carries_over_existing_sequences(plugin, now):
+def test_seed_carries_over_existing_sequences(plugin, existing_codes, now):
     """The counter starts above numbers already in use.
 
     SEED_FROM_EXISTING must stop the first post-upgrade code reissuing a number
-    already present in the stock table.
+    already present in the stock table. See tests/test_seeding.py for which
+    codes count as "already in use".
     """
+    existing_codes('B-0041')
     p = plugin(**SIMPLE)
-    p.seed_value = lambda scope: 41
 
     assert p.build_code(date=now) == 'B-0042'
     assert p.build_code(date=now) == 'B-0043'
 
 
-def test_seed_is_ignored_when_disabled(plugin, counters, now):
+def test_seed_is_ignored_when_disabled(plugin, counters, existing_codes, now):
+    existing_codes('B-0041')
     p = plugin(SEED_FROM_EXISTING=False, **SIMPLE)
-    assert p.seed_value({}) == 0
+
+    assert p.seed_value({}, date=now) == 0
     assert p.build_code(date=now) == 'B-0001'
     assert counters.store == {'part=|loc=|period=': 1}
