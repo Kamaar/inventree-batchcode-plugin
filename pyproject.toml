@@ -31,12 +31,19 @@ classifiers = [
 
 # Tooling only - the plugin has no runtime dependencies of its own.
 # Installed into .venv by `uv sync`.
+#
+# Django is a *test* dependency here: at runtime it is provided by the InvenTree
+# instance, but the test suite needs it importable to exercise core.py.
 [dependency-groups]
 dev = [
     "ruff>=0.12",
     "pre-commit>=4.0",
     "build>=1.2",
-    "twine>=6.0",
+    "pytest>=8.3",
+    # Marker required because the distribution supports 3.9 (as InvenTree still
+    # claims) while Django 5.2 needs 3.10+. Development targets .python-version.
+    "django>=5.2,<6.0; python_version >= '3.10'",
+    "djangorestframework>=3.15; python_version >= '3.10'",
 ]
 
 [project.urls]
@@ -51,15 +58,16 @@ include = ["batchcode_plugin*"]
 [tool.setuptools.dynamic]
 version = {attr = "batchcode_plugin.PLUGIN_VERSION"}
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.ruff]
 exclude = [
     ".git",
     "__pycache__",
-    "test.py",
     "build",
     "dist",
     "node_modules",
-    "tests",
     "venv",
     "env",
     ".venv",
@@ -83,6 +91,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Generated migrations are not documented
 "batchcode_plugin/migrations/*" = ["D"]
+# Tests: docstrings on every test function add noise, and the stub classes in
+# conftest deliberately mirror InvenTree's naming rather than PEP8's.
+"tests/*" = ["D103", "N801", "N802"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

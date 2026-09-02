@@ -21,6 +21,8 @@ Python tooling is managed with **uv**; the frontend with **npm**.
 uv sync                      # create .venv from pyproject's [dependency-groups] dev
 uv run ruff format .         # format (single quotes, see [tool.ruff.format])
 uv run ruff check .          # lint — CI runs format --check plus this
+uv run pytest                # tests
+uv run pytest tests/test_hook_contract.py::test_date_defaults_to_current_time
 uv run python -m build       # sdist + wheel into dist/
 
 cd frontend
@@ -32,31 +34,47 @@ npm run lint:fix             # biome check --fix (also formats)
 npm run dev                  # vite dev server on :5174, pairs with INVENTREE_PLUGIN_DEV_HOST
 ```
 
-There is **no test suite**. See *Verifying changes* below for what can actually be checked
-locally.
-
 ### Release ordering
 
 `batchcode_plugin/static/` is gitignored, so `cd frontend && npm run build` must run **before**
-`python -m build` or the wheel ships without a UI. `.github/workflows/pypi.yaml` does this in
-order; a manual release must too.
+`python -m build` or the wheel ships without a UI. There is no publishing workflow — the plugin
+is not on PyPI, and `pypi.yaml` was removed from the creator's scaffold. Releases are built by
+hand, in that order.
 
 ## Verifying changes
 
 Nothing in `batchcode_plugin/` can be imported outside a configured InvenTree/Django process —
 `core.py` imports `from plugin import InvenTreePlugin`, and the views and `seed_value` import
-`stock.models` / `part.models`. So:
+`stock.models` / `part.models`. `tests/conftest.py` works around this: it configures Django
+minimally, stubs `plugin`, `plugin.mixins`, `InvenTree.helpers`, `stock.models` and `part.models`
+in `sys.modules`, loads the plugin modules by path with `importlib`, and subclasses
+`BatchCodePlugin` with a dict-backed `get_setting`. So `uv run pytest` needs no InvenTree
+checkout.
 
-- **Backend logic** can be exercised offline by stubbing `plugin`, `plugin.mixins`,
-  `InvenTree.helpers`, `stock.models` and `batchcode_plugin.models` in `sys.modules`, then
-  loading `core.py` via `importlib`, subclassing `BatchCodePlugin` and overriding `get_setting`
-  to read from a dict. This covers `render_code`, `resolve_prefix`, `counter_scope`,
-  `wants_to_generate`, `extract_targets` and `build_code` — i.e. everything that decides what a
-  code looks like. Requires `uv run --with django==5.2.17`.
-- **Frontend** is genuinely verified by `npm run build` (`tsc -b` typechecks) and `npm run lint`.
+Two conventions in that harness are load-bearing:
+
+- The stub mixins carry working `get_settings_dict` and `plugin_static_file`, so tests exercise
+  the panel wiring instead of monkeypatching around it. Add a method to the stub when the plugin
+  starts relying on a new one from the real mixins.
+- `InMemoryCounter` fakes only persistence. `build_key` is bound to the **real**
+  `BatchCounter.build_key`, so the scope key under test is the production one — do not
+  reimplement it in the fake.
+
+What the suite does and does not reach:
+
+- **Covered**: format rendering and padding, counter scoping, hook kwargs resolution, trigger
+  modes, prefix resolution, role gating, panel context, URL names, serializer construction.
+- **Frontend** is genuinely verified by `npm run build` (`tsc -b` typechecks) and `npm run lint`,
+  not by pytest.
 - **Packaging** is verified by `python -m build` plus inspecting the wheel for
   `batchcode_plugin/static/Panel.js` and the `inventree_plugins` entry point.
-- **Anything touching the ORM or the registry** needs a real InvenTree instance.
+- **Anything touching the ORM or the registry** needs a real InvenTree instance:
+  `BatchCounter.advance`'s `select_for_update` behaviour, `seed_value`'s queries, the views'
+  request handling, and migrations.
+
+When changing generation logic, sanity-check that the suite is not vacuous by reintroducing the
+bug you are guarding against (e.g. `kwargs.get('item')` → `kwargs.get('stock_item')`) and
+confirming tests fail.
 
 ## Architecture
 
@@ -113,6 +131,18 @@ strings/ints (plus the datetime). Model instances are deliberately not exposed �
 can traverse attributes. A bare `{num}` is rewritten to `{num:0<MIN_DIGITS>d}` before
 formatting, so an explicit spec like `{num:06d}` wins over `MIN_DIGITS`.
 
+### Serializers: queryset resolution
+
+The InvenTree models cannot be imported while `serializers.py` loads — the plugin registry is
+still being built. But DRF validates `queryset` inside `RelatedField.__init__`, which runs when
+the **class body is evaluated**, i.e. at import. So the tempting pattern — declare
+`PrimaryKeyRelatedField(queryset=None)` and fill it in from `Serializer.__init__` — raises
+`AssertionError` at import and takes the plugin's whole URL set down with it.
+
+The working pattern is the `LazyModelField` subclasses: drop the `queryset` kwarg and override
+`get_queryset()`, which both defers the model import and suppresses DRF's constructor check.
+`tests/test_api_surface.py` guards this.
+
 ### Frontend
 
 `frontend/src/Panel.tsx` renders the stock item panel (`get_ui_panels`, gated on
@@ -152,7 +182,8 @@ There is no separate server flag for app plugins in InvenTree 1.x — only `plug
 - Code, setting keys and user-facing strings are English; Django strings use `gettext_lazy as _`,
   frontend strings the lingui `t` macro. Italian is the fully-translated frontend locale.
 - Ruff formats with **single quotes** and enforces google-style docstrings (`D` rules) on every
-  module, class and public method. `batchcode_plugin/migrations/` is exempt from `D`.
+  module, class and public method. `batchcode_plugin/migrations/` is exempt from `D`; `tests/`
+  is linted but exempt from `D103` and the `N80x` naming rules.
 - Logging goes through `logging.getLogger('inventree')`, messages prefixed `BatchCodePlugin:`.
 - Bump the version in **one** place: `batchcode_plugin/__init__.py:PLUGIN_VERSION`.
   `pyproject.toml` reads it dynamically and `core.py` uses it for `VERSION`. (1.x had three

@@ -25,16 +25,28 @@ how the code is formatted.
 
 ## Installation
 
+> **Not published to PyPI.** Install from this repository.
+
 ### Plugin manager
 
-Install `inventree-batchcode-plugin` from the InvenTree plugin manager
-(Settings → Plugins → Install Plugin), then restart the server.
+In Settings → Plugins → Install Plugin, install from the source URL:
+
+```
+git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.0
+```
 
 ### Command line
 
+Into the InvenTree instance's own environment:
+
 ```bash
-pip install -U inventree-batchcode-plugin
+pip install -U git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.0
 ```
+
+Installing from git builds the package from source, which does **not** include
+the compiled frontend bundles — they are not committed. Without them the plugin
+works, but its UI panel and settings preview do not render. To include them,
+build a wheel first (see *Building a release* below) and install that.
 
 ### After installing
 
@@ -128,12 +140,14 @@ fall back to English.
 
 ## Development
 
-The Python environment is managed with [uv](https://docs.astral.sh/uv/).
+The Python environment is managed with [uv](https://docs.astral.sh/uv/), and
+targets the version in `.python-version`.
 
 ```bash
 uv sync                    # create .venv with the dev tooling
 uv run ruff format .       # format
 uv run ruff check .        # lint
+uv run pytest              # tests
 uv run python -m build     # build sdist + wheel
 ```
 
@@ -147,8 +161,33 @@ npm run build              # bundle into batchcode_plugin/static/
 npm run lint               # biome
 ```
 
-The compiled bundles in `batchcode_plugin/static/` are not committed, so
-`npm run build` must run before packaging — the release workflow does this.
+### Tests
+
+`tests/` covers the parts of the plugin that decide what a code looks like:
+format rendering and padding, counter scoping, the `generate_batch_code` hook
+context, trigger modes, role gating, and that the REST serializers import and
+construct. Everything that touches the ORM or the plugin registry needs a real
+InvenTree instance and is out of scope.
+
+The InvenTree modules are stubbed in `tests/conftest.py`, so the suite runs
+without an InvenTree checkout — `uv run pytest`, nothing else. Persistence is
+the only faked part: `BatchCounter.peek` / `.advance` are replaced with an
+in-memory store, while `build_key` is delegated to the real model so the tests
+cannot drift from the production scope key.
+
+### Building a release
+
+The compiled bundles in `batchcode_plugin/static/` are not committed, so the
+frontend must be built **before** the package, or the wheel ships without a UI:
+
+```bash
+cd frontend && npm install && npm run translate && npm run build && cd ..
+uv run python -m build          # -> dist/*.whl
+```
+
+There is no PyPI publishing workflow. To add one, restore the plugin creator's
+`pypi.yaml` (it triggers on `release: published` and needs a `PYPI_API_TOKEN`
+repository secret), making sure the frontend build step still runs first.
 
 This project was restructured with the
 [InvenTree plugin creator](https://github.com/inventree/plugin-creator).
@@ -194,7 +233,8 @@ Breaking and behavioural changes:
 - Correct handling of the `generate_batch_code` hook context
 - React panel for the stock item page and a live preview on the settings page
 - Preview and generate REST endpoints (`UrlsMixin`)
-- uv-managed Python environment, ruff formatting and linting, GitHub Actions CI
+- uv-managed Python environment, ruff formatting and linting, pytest suite,
+  GitHub Actions CI
 - Removed `TARGET_FIELD`; see *Upgrading from 1.x*
 
 ### 1.7
