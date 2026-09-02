@@ -67,7 +67,9 @@ def test_supplied_date_is_used(plugin):
     assert date == supplied
 
 
-def test_per_part_counter_works_through_item(plugin, item, part, other_part, now):
+def test_per_part_counter_works_through_item(
+    plugin, issue, item, part, other_part, now
+):
     """End-to-end consequence of the kwargs fix.
 
     Passing the item must land on the *same* counter as passing its part
@@ -76,12 +78,12 @@ def test_per_part_counter_works_through_item(plugin, item, part, other_part, now
     """
     p = plugin(PER_PART=True, CODE_FORMAT='{prefix}{sep}{num}')
 
-    assert p.build_code(item=item, date=now) == 'B-0001'
+    assert issue(p, item=item, date=now) == 'B-0001'
     # Same scope as the item's part, so it continues that sequence
-    assert p.build_code(part=part, date=now) == 'B-0002'
+    assert issue(p, part=part, date=now) == 'B-0002'
     # A different part starts its own
-    assert p.build_code(part=other_part, date=now) == 'B-0001'
-    assert p.build_code(item=item, date=now) == 'B-0003'
+    assert issue(p, part=other_part, date=now) == 'B-0001'
+    assert issue(p, item=item, date=now) == 'B-0003'
 
 
 # --- trigger modes -------------------------------------------------------

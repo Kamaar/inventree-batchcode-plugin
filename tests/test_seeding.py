@@ -75,13 +75,13 @@ def test_preview_reflects_the_seed_without_consuming_it(plugin, existing_codes, 
     assert p.build_code(date=now) == '20260902-0008'
 
 
-def test_counter_wins_once_it_is_ahead(plugin, existing_codes, now):
+def test_counter_wins_once_it_is_ahead(plugin, issue, existing_codes, now):
     """The seed is a floor, not an override."""
     existing_codes('20260902-0003')
     p = plugin(**WEEKLY)
 
-    assert p.build_code(date=now) == '20260902-0004'
-    assert p.build_code(date=now) == '20260902-0005'
+    assert issue(p, date=now) == '20260902-0004'
+    assert issue(p, date=now) == '20260902-0005'
 
 
 # --- pattern derivation --------------------------------------------------

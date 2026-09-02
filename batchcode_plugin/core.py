@@ -394,47 +394,87 @@ class BatchCodePlugin(
 
         return part, location, date
 
-    def build_code(self, commit: bool = True, **kwargs) -> str:
-        """Produce a batch code.
+    def resolved_context(self, **kwargs) -> tuple:
+        """Return (scope, kwargs) with part, location and date filled in."""
+        part, location, date = self.extract_targets(**kwargs)
+
+        scope = self.counter_scope(part=part, location=location, date=date)
+
+        kwargs['part'] = part
+        kwargs['location'] = location
+        kwargs['date'] = date
+
+        return scope, kwargs
+
+    def build_code(self, **kwargs) -> str:
+        """Return the batch code which will be issued next.
+
+        **This reads; it does not reserve.** Calling it twice returns the same
+        code until one is actually saved, which is what InvenTree requires:
+        it invokes the generation hook to fill form defaults and to build API
+        metadata - `InvenTree/metadata.py` calls callable model defaults, three
+        times per `OPTIONS /api/stock/` - and the hook cannot tell any of that
+        apart from a real stock creation. A hook that consumed a value per call
+        would inflate the sequence by roughly four for every form opened.
+
+        The number is the greater of the stored high-water mark and the highest
+        number already used by a matching code in the stock table, plus one.
+        See :meth:`record_code` for the other half.
 
         Args:
-            commit: When True the counter is advanced, so the code is reserved.
-                When False the next value is only previewed, leaving the
-                counter untouched.
             **kwargs: Generation context, as described in
                 :meth:`generate_batch_code`.
 
         Returns:
             The rendered batch code.
         """
-        part, location, date = self.extract_targets(**kwargs)
+        scope, kwargs = self.resolved_context(**kwargs)
 
-        scope = self.counter_scope(part=part, location=location, date=date)
         key = BatchCounter.build_key(**scope)
-        seed = self.seed_value(
-            scope,
-            part=part,
-            location=location,
-            date=date,
-            **{
-                k: v for k, v in kwargs.items() if k not in ('part', 'location', 'date')
-            },
+        number = BatchCounter.peek(key, seed=self.seed_value(scope, **kwargs))
+
+        return self.render_code(
+            self.resolve_prefix(kwargs['location']), number, **kwargs
         )
 
-        if commit:
-            number = BatchCounter.advance(key, seed=seed, **scope)
-        else:
-            number = BatchCounter.peek(key, seed=seed)
-
-        kwargs['part'] = part
-        kwargs['location'] = location
-        kwargs['date'] = date
-
-        return self.render_code(self.resolve_prefix(location), number, **kwargs)
-
     def preview_code(self, **kwargs) -> str:
-        """Render the code which would be issued next, without consuming it."""
-        return self.build_code(commit=False, **kwargs)
+        """Alias of :meth:`build_code`, for readable call sites."""
+        return self.build_code(**kwargs)
+
+    def record_code(self, code: str, **kwargs):
+        """Note that `code` is now in use, so its number is not reissued.
+
+        Called when a batch code is saved, not when one is generated. Deriving
+        the next number from the stock table covers almost everything on its
+        own; the stored mark adds the one thing it cannot, namely keeping a
+        number spent after the stock item that used it has been deleted.
+
+        Codes that the current format could not have produced - hand-entered
+        supplier lot numbers, codes from another period - are ignored.
+
+        Returns:
+            The stored value after the update, or None if nothing was recorded.
+        """
+        if not code:
+            return None
+
+        scope, kwargs = self.resolved_context(**kwargs)
+
+        pattern, _literal = self.code_pattern(
+            self.resolve_prefix(kwargs['location']), **kwargs
+        )
+
+        if pattern is None:
+            return None
+
+        match = pattern.match(str(code))
+
+        if not match:
+            return None
+
+        return BatchCounter.record(
+            BatchCounter.build_key(**scope), int(match.group(1)), **scope
+        )
 
     # ------------------------------------------------------------------
     # Custom data validation (from ValidationMixin)
@@ -452,14 +492,31 @@ class BatchCodePlugin(
         if not self.wants_to_generate(**kwargs):
             return None
 
-        code = self.build_code(commit=True, **kwargs)
+        code = self.build_code(**kwargs)
 
         if not code:
             return None
 
-        logger.info('BatchCodePlugin: generated batch code %s', code)
+        logger.debug('BatchCodePlugin: generated batch code %s', code)
 
         return code
+
+    def validate_batch_code(self, batch_code, stock_item, **kwargs):
+        """Record a batch code which is being saved.
+
+        This is where the counter actually moves. The plugin neither accepts
+        nor rejects codes, so it always returns None and leaves the verdict to
+        InvenTree and any other validation plugin - and it must never raise,
+        since an exception here would reject the user's code.
+        """
+        try:
+            self.record_code(batch_code, item=stock_item)
+        except Exception:
+            logger.exception(
+                'BatchCodePlugin: could not record batch code %s', batch_code
+            )
+
+        return None
 
     # ------------------------------------------------------------------
     # Custom URL endpoints (from UrlsMixin)

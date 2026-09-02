@@ -107,33 +107,38 @@ class BatchCounter(models.Model):
 
     @classmethod
     def peek(cls, key: str, seed: int = 0) -> int:
-        """Return the value the next call to :meth:`advance` would issue.
+        """Return the counter value the next code will use.
 
-        Does not modify any state - used for previewing a code.
+        Reads only. Generating a batch code must not change anything: InvenTree
+        calls the generation hook to fill in form defaults and to build API
+        metadata, several times per form opened, and cannot tell those apart
+        from a real stock creation. See :meth:`record`.
         """
         current = cls.objects.filter(key=key).values_list('value', flat=True).first()
         return max(current or 0, seed) + 1
 
     @classmethod
-    def advance(cls, key: str, seed: int = 0, **scope) -> int:
-        """Atomically issue the next value for the given scope.
+    def record(cls, key: str, number: int, **scope) -> int:
+        """Raise the high-water mark to cover a number now in use.
+
+        Called when a batch code is actually saved onto a stock item, not when
+        one is generated. The row is only ever raised, never lowered, so a
+        number stays spent even if the stock item that used it is deleted -
+        which is the one thing deriving from the stock table cannot do.
 
         Args:
             key: Scope key, as built by :meth:`build_key`.
-            seed: Floor for the counter, applied on every call. Used to carry
-                over sequences from batch codes which already exist in the
-                database, so that an upgrade from a derived counter does not
-                reissue codes which are already in use.
-            scope: Denormalized scope fields (part, location, period) stored on
-                creation for readability.
+            number: Counter value found in the code being saved.
+            scope: Denormalized scope fields (part, location, period), stored
+                on creation for readability in the admin interface.
 
         Returns:
-            The newly issued counter value.
+            The stored value after the update.
         """
         with transaction.atomic():
             try:
                 counter, _created = cls.objects.get_or_create(
-                    key=key, defaults={'value': 0, **scope}
+                    key=key, defaults={'value': number, **scope}
                 )
             except IntegrityError:
                 # Concurrent create won the race; the row now exists
@@ -142,7 +147,8 @@ class BatchCounter(models.Model):
             # Re-read under a row lock, so concurrent writers serialize here
             counter = cls.objects.select_for_update().get(pk=counter.pk)
 
-            counter.value = max(counter.value, seed) + 1
-            counter.save(update_fields=['value', 'updated'])
+            if counter.value < number:
+                counter.value = number
+                counter.save(update_fields=['value', 'updated'])
 
             return counter.value

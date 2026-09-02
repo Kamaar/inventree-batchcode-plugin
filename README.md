@@ -4,7 +4,7 @@ Generate progressive batch codes for InvenTree `StockItem` records, with a
 configurable format and persistent per-part / per-location counters.
 
 - **Author:** Simone Amadori
-- **Plugin version:** 2.0.1
+- **Plugin version:** 2.0.2
 - **Requires:** InvenTree 1.0.0 or newer (developed against 1.5.2)
 
 ---
@@ -47,14 +47,14 @@ In **Settings → Plugins → Install Plugin**, fill in:
 | Field | Value |
 | --- | --- |
 | Package name | `inventree-batchcode-plugin` |
-| Source URL | `git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.1` |
+| Source URL | `git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.2` |
 
-Drop the `@v2.0.1` to follow the default branch instead of a fixed release.
+Drop the `@v2.0.2` to follow the default branch instead of a fixed release.
 
 Equivalently, from a shell in the InvenTree environment:
 
 ```bash
-pip install -U git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.1
+pip install -U git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.2
 ```
 
 Note that a plain `https://` URL is not an alternative here: InvenTree passes
@@ -217,23 +217,45 @@ With all three off there is one global sequence; with `PER_PART` on, each part
 gets its own. The scopes are visible in the Django admin interface under
 *Batch Counters*, where a sequence can also be inspected or reset by hand.
 
-### Gaps in the sequence are normal
+### Generating a code does not consume it
 
-Counter values are consumed when a code is **generated**, not when the stock
-item is saved. Codes are guaranteed unique and increasing, **not gapless**, and
-the gaps are larger than they first look.
+Asking for a batch code is a **read**. The same code comes back until one is
+actually saved, and the sequence follows the codes in use rather than the
+number of times a form was opened.
 
-`StockItem.batch` is declared in InvenTree with `default=generate_batch_code`,
-and Django evaluates a field default whenever a model instance is
-*constructed*, not when it is saved. So a value is consumed by opening the
-stock creation form (InvenTree pre-fills the field through
-`/api/stock/generate/batch-code/`) even if you cancel, by stock splits and
-transfers that create new rows, and by anything else that instantiates a
-`StockItem` without an explicit batch. On one instance the counter reached 16
-before a single batch code had been deliberately generated.
+This is not a stylistic choice. InvenTree calls the generation hook in three
+situations, with identical arguments and no way to tell them apart: building
+API metadata, pre-filling a form field, and creating stock for real.
+`InvenTree/metadata.py` deliberately calls callable model defaults so the
+frontend can show a pre-filled value, and `StockItem.batch` is declared with
+`default=generate_batch_code`. Measured on a live instance:
 
-If that matters, the counter is editable: Django admin → *Batch Counters* →
-set *Value* to whatever the next code should follow.
+| Request | Counter |
+| --- | --- |
+| `OPTIONS /api/stock/` (the form's field metadata) | +3 |
+| `POST /api/generate/batch-code/` | +1 |
+| `GET /api/stock/` | unchanged |
+
+So a hook that reserved a number per call would burn about four per form
+opened, whether or not anything was saved — which is exactly what happened
+before 2.0.2.
+
+The next number is the greater of two things: the highest number already used
+by a code **the current format would have produced** (see below), and a stored
+high-water mark. The mark is raised when a code is saved, through
+`validate_batch_code`. It earns its keep in one case that the stock table
+cannot cover: a number stays spent after the stock item that used it has been
+deleted.
+
+Codes are therefore contiguous in normal use. They are **not** guaranteed
+unique, and that is deliberate — a batch code identifies a batch, and several
+stock items are expected to share one.
+
+> **Upgrading from 2.0.1 or earlier:** those versions consumed a value per
+> call, so the stored counter is probably far ahead of the codes you actually
+> use. It acts as a floor, so it will keep the sequence inflated. Reset it once
+> in Django admin → *Batch Counters* → *Value*, setting it to the highest
+> number really in use (or 0 to derive it from the stock table).
 
 ### What counts as an existing code
 
@@ -402,6 +424,17 @@ Breaking and behavioural changes:
   in `CODE_FORMAT` instead.
 
 ## Changelog
+
+### 2.0.2
+- **Generating a batch code no longer consumes one.** InvenTree calls the hook
+  to build API metadata and to pre-fill form fields, not only to create stock,
+  and cannot signal which is which — `OPTIONS /api/stock/` alone cost three
+  values, so simply opening the stock form advanced the sequence by about four.
+  Generation is now a read, and the counter is raised when a code is actually
+  saved, via `validate_batch_code`. See *Generating a code does not consume it*.
+  If you are upgrading, reset the inflated counter once in the Django admin.
+- The counter model's `advance()` became `record()`: it is a high-water mark
+  now, raised to cover a number in use, rather than incremented per call.
 
 ### 2.0.1
 - **Fixed `SEED_FROM_EXISTING` reading unrelated numbers.** It took the

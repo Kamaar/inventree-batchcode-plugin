@@ -7,43 +7,45 @@ NEXT_DAY = datetime.datetime(2026, 9, 3, 9, 0)
 SIMPLE = {'CODE_FORMAT': '{prefix}{sep}{num}'}
 
 
-def test_single_global_counter_by_default(plugin, part, other_part, now):
+def test_single_global_counter_by_default(plugin, issue, part, other_part, now):
     p = plugin(**SIMPLE)
-    assert p.build_code(part=part, date=now) == 'B-0001'
-    assert p.build_code(part=other_part, date=now) == 'B-0002'
+    assert issue(p, part=part, date=now) == 'B-0001'
+    assert issue(p, part=other_part, date=now) == 'B-0002'
 
 
-def test_per_part_counters_are_independent(plugin, part, other_part, now):
+def test_per_part_counters_are_independent(plugin, issue, part, other_part, now):
     p = plugin(PER_PART=True, **SIMPLE)
-    assert p.build_code(part=part, date=now) == 'B-0001'
-    assert p.build_code(part=other_part, date=now) == 'B-0001'
-    assert p.build_code(part=part, date=now) == 'B-0002'
-    assert p.build_code(part=other_part, date=now) == 'B-0002'
+    assert issue(p, part=part, date=now) == 'B-0001'
+    assert issue(p, part=other_part, date=now) == 'B-0001'
+    assert issue(p, part=part, date=now) == 'B-0002'
+    assert issue(p, part=other_part, date=now) == 'B-0002'
 
 
-def test_per_location_counters_are_independent(plugin, location, other_location, now):
+def test_per_location_counters_are_independent(
+    plugin, issue, location, other_location, now
+):
     p = plugin(PER_LOCATION=True, **SIMPLE)
-    assert p.build_code(location=location, date=now) == 'B-0001'
-    assert p.build_code(location=other_location, date=now) == 'B-0001'
-    assert p.build_code(location=location, date=now) == 'B-0002'
+    assert issue(p, location=location, date=now) == 'B-0001'
+    assert issue(p, location=other_location, date=now) == 'B-0001'
+    assert issue(p, location=location, date=now) == 'B-0002'
 
 
-def test_daily_reset(plugin, now):
+def test_daily_reset(plugin, issue, now):
     p = plugin(DAILY_RESET=True, **SIMPLE)
-    assert p.build_code(date=now) == 'B-0001'
-    assert p.build_code(date=now) == 'B-0002'
-    assert p.build_code(date=NEXT_DAY) == 'B-0001'
+    assert issue(p, date=now) == 'B-0001'
+    assert issue(p, date=now) == 'B-0002'
+    assert issue(p, date=NEXT_DAY) == 'B-0001'
 
 
-def test_daily_reset_does_not_need_the_date_in_the_code(plugin, now):
+def test_daily_reset_does_not_need_the_date_in_the_code(plugin, issue, now):
     """DAILY_RESET works without {date} in the format.
 
     1.x filtered existing codes for today's date, so it silently did nothing
     unless CODE_FORMAT embedded the date. The counter now carries the period.
     """
     p = plugin(DAILY_RESET=True, CODE_FORMAT='{prefix}{sep}{num}')
-    assert p.build_code(date=now) == 'B-0001'
-    assert p.build_code(date=NEXT_DAY) == 'B-0001'
+    assert issue(p, date=now) == 'B-0001'
+    assert issue(p, date=NEXT_DAY) == 'B-0001'
 
 
 def test_scope_key_is_empty_when_unscoped(plugin, models, part, location, now):
@@ -71,15 +73,15 @@ def test_scope_keys_are_distinct_per_dimension(models, part, other_part, locatio
     assert len(keys) == 6
 
 
-def test_preview_does_not_consume_a_value(plugin, now):
+def test_preview_does_not_consume_a_value(plugin, issue, now):
     p = plugin(**SIMPLE)
-    assert p.build_code(date=now) == 'B-0001'
+    assert p.preview_code(date=now) == 'B-0001'
+    assert p.preview_code(date=now) == 'B-0001'
+    assert issue(p, date=now) == 'B-0001'
     assert p.preview_code(date=now) == 'B-0002'
-    assert p.preview_code(date=now) == 'B-0002'
-    assert p.build_code(date=now) == 'B-0002'
 
 
-def test_seed_carries_over_existing_sequences(plugin, existing_codes, now):
+def test_seed_carries_over_existing_sequences(plugin, issue, existing_codes, now):
     """The counter starts above numbers already in use.
 
     SEED_FROM_EXISTING must stop the first post-upgrade code reissuing a number
@@ -89,14 +91,14 @@ def test_seed_carries_over_existing_sequences(plugin, existing_codes, now):
     existing_codes('B-0041')
     p = plugin(**SIMPLE)
 
-    assert p.build_code(date=now) == 'B-0042'
-    assert p.build_code(date=now) == 'B-0043'
+    assert issue(p, date=now) == 'B-0042'
+    assert issue(p, date=now) == 'B-0043'
 
 
-def test_seed_is_ignored_when_disabled(plugin, counters, existing_codes, now):
+def test_seed_is_ignored_when_disabled(plugin, issue, counters, existing_codes, now):
     existing_codes('B-0041')
     p = plugin(SEED_FROM_EXISTING=False, **SIMPLE)
 
     assert p.seed_value({}, date=now) == 0
-    assert p.build_code(date=now) == 'B-0001'
+    assert issue(p, date=now) == 'B-0001'
     assert counters.store == {'part=|loc=|period=': 1}

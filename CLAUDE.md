@@ -168,10 +168,33 @@ since `NULL != NULL` in SQL.
 `transaction.atomic()` so concurrent stock creation serializes. `peek()` is the read-only twin
 used for previews.
 
-`seed`, passed on every `advance()`/`peek()`, is a floor derived from batch codes already in the
-database (`seed_value()`, gated by the `SEED_FROM_EXISTING` setting). It exists so upgrading from
-1.x — where the counter was recomputed from the stock table each time — does not reissue codes
-already in use.
+### Generation reads, recording writes
+
+`build_code()` is a **pure read** — same code until one is saved — and this is forced by how
+InvenTree calls the hook. `InvenTree/metadata.py` calls callable model defaults so a form can
+show a pre-filled value, and `StockItem.batch` is declared `default=generate_batch_code`, so the
+hook fires for API metadata and form pre-fill as well as for real creation, with identical
+kwargs. Measured: `OPTIONS /api/stock/` +3, `POST /api/generate/batch-code/` +1, `GET` +0. A
+reserve-per-call design inflates the sequence by ~4 per form opened; 2.0.1 and earlier did
+exactly that.
+
+`record_code()` is the only writer, called from `validate_batch_code()` (and explicitly from the
+manual generate view, since `save(update_fields=...)` skips `full_clean()` and therefore skips
+validation). `BatchCounter.record()` only ever raises the stored value. That mark is not
+redundant with deriving from the stock table: it keeps a number spent after the stock item that
+used it is deleted.
+
+Two invariants to preserve: `validate_batch_code` must return `None` (the plugin has no verdict
+to offer) and must never raise (an exception there rejects the user's code). `tests/test_recording.py`
+holds both, plus the metadata scenario.
+
+Batch codes are **not** unique by design — several stock items share a batch — so do not
+reintroduce locking to make generation atomic. That was the mistake 2.0.1 corrected.
+
+`seed`, passed to `peek()`, is a floor derived from batch codes already in the database
+(`seed_value()`, gated by the `SEED_FROM_EXISTING` setting). It exists so upgrading from 1.x —
+where the counter was recomputed from the stock table each time — does not reissue codes already
+in use.
 
 **`seed_value()` must only read codes the current format could have produced.** Batch codes are
 also typed in by hand: supplier and manufacturer lot numbers live in the same field. An earlier
@@ -185,12 +208,6 @@ no `{num}` (or more than one) yields no pattern and seeding is skipped rather th
 `render_code(..., truncate=False)` exists for this: clipping to 100 characters would cut the text
 after the counter out of the pattern. `tests/test_seeding.py` covers it.
 
-Counter values are consumed at generation time, not when the stock item is saved, so gaps are
-normal — and bigger than they look. `StockItem.batch` is declared with
-`default=generate_batch_code`, and Django evaluates field defaults when a model instance is
-*constructed*, so merely opening the stock creation form burns a value. One instance reached 16
-before a code had been deliberately generated. Codes are unique and increasing, **not** gapless;
-don't "fix" that without changing the model to reserve-and-confirm.
 
 ### Settings
 

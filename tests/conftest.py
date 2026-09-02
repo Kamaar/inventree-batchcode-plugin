@@ -180,15 +180,14 @@ class InMemoryCounter:
 
     @classmethod
     def peek(cls, key, seed=0):
-        """Return the value advance() would issue, without consuming it."""
+        """Return the counter value the next code will use."""
         return max(cls.store.get(key, 0), seed) + 1
 
     @classmethod
-    def advance(cls, key, seed=0, **scope):
-        """Issue and record the next value for this scope."""
-        value = max(cls.store.get(key, 0), seed) + 1
-        cls.store[key] = value
-        return value
+    def record(cls, key, number, **scope):
+        """Raise the high-water mark to cover a number now in use."""
+        cls.store[key] = max(cls.store.get(key, 0), number)
+        return cls.store[key]
 
 
 def _plugin_version() -> str:
@@ -265,6 +264,23 @@ def _clear_counters():
     yield
     InMemoryCounter.reset()
     FakeStockQuerySet.codes = []
+
+
+@pytest.fixture
+def issue():
+    """Generate a code and mark it used, as saving a stock item would.
+
+    Generation itself is a pure read — `build_code` returns the same code until
+    one is actually saved — so a test that wants a *sequence* has to record
+    each code, which is what InvenTree does through `validate_batch_code`.
+    """
+
+    def _issue(plugin, **kwargs):
+        code = plugin.build_code(**kwargs)
+        plugin.record_code(code, **kwargs)
+        return code
+
+    return _issue
 
 
 @pytest.fixture

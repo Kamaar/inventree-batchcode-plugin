@@ -94,13 +94,18 @@ class GenerateBatchCodeView(APIView):
                 {'item': _('This stock item already has a batch code')}
             )
 
-        code = plugin.build_code(commit=True, item=item, force=True)
+        code = plugin.build_code(item=item, force=True)
 
         if not code:
             raise ValidationError(_('Could not generate a batch code'))
 
         item.batch = code
         item.save(update_fields=['batch'])
+
+        # save(update_fields=...) skips full_clean(), so validate_batch_code -
+        # where the counter normally moves - does not run. Record it here, or
+        # this code would be handed out again.
+        plugin.record_code(code, item=item)
 
         return Response(
             BatchCodeResponseSerializer({'batch_code': code}).data, status=200

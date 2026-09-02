@@ -8,11 +8,23 @@ def test_default_format(plugin, part, location, now):
     assert p.build_code(part=part, location=location, date=now) == 'B20260902-0001'
 
 
-def test_counter_increments(plugin, now):
+def test_generating_is_a_read(plugin, now):
+    """Repeated calls return the same code until one is saved.
+
+    InvenTree calls the hook to fill form defaults and to build API metadata,
+    several times per form opened, so generation must not consume anything.
+    """
     p = plugin()
     assert p.build_code(date=now) == 'B20260902-0001'
-    assert p.build_code(date=now) == 'B20260902-0002'
-    assert p.build_code(date=now) == 'B20260902-0003'
+    assert p.build_code(date=now) == 'B20260902-0001'
+    assert p.build_code(date=now) == 'B20260902-0001'
+
+
+def test_sequence_advances_once_codes_are_used(plugin, issue, now):
+    p = plugin()
+    assert issue(p, date=now) == 'B20260902-0001'
+    assert issue(p, date=now) == 'B20260902-0002'
+    assert issue(p, date=now) == 'B20260902-0003'
 
 
 def test_bare_num_takes_min_digits(plugin, now):
