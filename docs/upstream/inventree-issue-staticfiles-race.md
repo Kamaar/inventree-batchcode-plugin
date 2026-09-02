@@ -1,7 +1,10 @@
-> **Status:** drafted, not yet filed upstream. Kept in the repository because
-> the install steps in the README ask users to turn off `PLUGIN_ON_STARTUP`,
-> and this is the analysis that justifies it. Delete this block before pasting
-> the rest into a GitHub issue.
+> **Status:** filed upstream as
+> [inventree/InvenTree#12768](https://github.com/inventree/InvenTree/issues/12768)
+> on 2 September 2026. Follow that issue for whether the behaviour changes; until
+> it does, the `PLUGIN_ON_STARTUP` workaround in the README install steps stands.
+>
+> Kept here because those install steps ask users to turn a setting off, and this
+> is the analysis that justifies it.
 
 # Plugin static file collection races between processes, leaving the static directory half populated
 

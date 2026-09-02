@@ -86,9 +86,10 @@ Two facts combine:
 
 `PLUGIN_ON_STARTUP` ("Check plugins on startup") gates both call sites and defaults to on when
 `INVENTREE_DOCKER` is set. Turning it off is the actual fix; the README's install steps carry the
-procedure and the trade-off. `docs/upstream/inventree-issue-staticfiles-race.md` holds the full
-analysis, including why this is not a duplicate of the closed upstream #12130 (which blamed an
-external `invoke plugins`) and #7709.
+procedure and the trade-off. Reported upstream as inventree/InvenTree#12768 — check there before
+re-investigating. `docs/upstream/inventree-issue-staticfiles-race.md` holds the full analysis,
+including why this is not a duplicate of the closed #12130 (which blamed an external
+`invoke plugins`) and #7709.
 
 When diagnosing, check whether the files are *served* — `fetch('/static/plugins/batchcode/Panel.js')`
 — rather than whether they exist on disk. They were verified byte-identical on disk while
