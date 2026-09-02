@@ -1,0 +1,20 @@
+# Normalise line endings to LF in the repository, and check out LF on every
+# platform - including Windows, where core.autocrlf would otherwise produce
+# CRLF working copies.
+#
+# This is not cosmetic. The compiled bundles in batchcode_plugin/static/ are
+# committed, and a sourcemap embeds its sources verbatim in "sourcesContent",
+# line endings included. A CRLF checkout of frontend/src therefore builds
+# different .js.map files than a LF one, which would make the CI check for
+# up-to-date artifacts fail on Windows even when nothing had changed.
+* text=auto eol=lf
+
+# Generated artifacts: never transform them, so they stay byte-identical to
+# whatever the build produced.
+batchcode_plugin/static/** -text
+frontend/src/locales/**/messages.ts -text
+frontend/src/locales/**/messages.d.ts -text
+
+# Lockfiles are generated; keep them out of diff review noise
+frontend/package-lock.json -diff linguist-generated
+uv.lock -diff linguist-generated

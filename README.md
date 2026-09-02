@@ -25,42 +25,82 @@ how the code is formatted.
 
 ## Installation
 
-> **Not published to PyPI.** Install from this repository.
+> **Not published to PyPI** — install from this repository. Everything needed,
+> including the compiled user interface, is committed here, so there is nothing
+> to build first.
+>
+> **One step needs server access.** This plugin adds a database table, and
+> InvenTree's plugin installer does not run migrations. Installation cannot be
+> completed from the web interface alone — see step 4.
 
-### Plugin manager
+### Before you start
 
-In Settings → Plugins → Install Plugin, install from the source URL:
+Plugins must be enabled server-side: set `plugins_enabled: True` in
+`config.yaml`, or the environment variable `INVENTREE_PLUGINS_ENABLED=true`.
+The server also needs `git` available for an installation from a git URL (the
+official Docker images have it).
 
-```
-git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.0
-```
+### 1. Install the package
 
-### Command line
+In **Settings → Plugins → Install Plugin**, fill in:
 
-Into the InvenTree instance's own environment:
+| Field | Value |
+| --- | --- |
+| Package name | `inventree-batchcode-plugin` |
+| Source URL | `git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.0` |
+
+Drop the `@v2.0.0` to follow the default branch instead of a fixed release.
+
+Equivalently, from a shell in the InvenTree environment:
 
 ```bash
 pip install -U git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.0
 ```
 
-Installing from git builds the package from source, which does **not** include
-the compiled frontend bundles — they are not committed. Without them the plugin
-works, but its UI panel and settings preview do not render. To include them,
-build a wheel first (see *Building a release* below) and install that.
+Note that a plain `https://` URL is not an alternative here: InvenTree passes
+such URLs to pip as a *package index* (`-i`), not as a package to install, so a
+link to a release file will not work.
 
-### After installing
+### 2. Enable the plugin
 
-1. **Enable the plugin** in Settings → Plugins.
-2. **Restart the InvenTree server.** The plugin uses `AppMixin`, so it is loaded
-   as a Django application; this only happens at startup.
-3. **Apply the database migration** that creates the counter table:
-   ```bash
-   invoke migrate
-   ```
-   (or `python manage.py migrate batchcode_plugin` in a manual installation).
+Activate **BatchCodePlugin** in Settings → Plugins.
 
-Plugins must be enabled server-side for any of this to work — set
-`plugins_enabled: True` in `config.yaml`, or `INVENTREE_PLUGINS_ENABLED=true`.
+### 3. Enable the three integrations it needs
+
+Still under Settings → Plugins, in the *Plugin Settings* section. **All three
+default to off**, and the plugin is inert without them:
+
+| Setting | Without it |
+| --- | --- |
+| Enable app integration | The counter table is never loaded — nothing works |
+| Enable URL integration | The preview and generate endpoints return 404 |
+| Enable interface integration | The stock item panel and format preview never appear |
+
+### 4. Restart, and apply the migration
+
+From a shell on the server — this is the step that cannot be done from the web
+interface:
+
+```bash
+invoke update      # includes the database migration
+```
+
+Or, to migrate without a full update:
+
+```bash
+invoke migrate
+```
+
+In a manual installation: `python manage.py migrate batchcode_plugin`.
+
+A restart is required in any case: the plugin is loaded as a Django
+application, which only happens at startup.
+
+### Checking it worked
+
+Open any stock item — there should be a **Batch Code** panel showing the
+current code and a preview of the next one. If the panel is missing, revisit
+step 3; if it loads but reports an error, the migration in step 4 has not run.
 
 ## Configuration
 
@@ -155,11 +195,45 @@ Frontend (see `frontend/README.md` for details):
 
 ```bash
 cd frontend
-npm install
+npm ci                     # not `npm install` — several deps are "latest"
 npm run translate          # extract + compile message catalogs
-npm run build              # bundle into batchcode_plugin/static/
+npm run build              # bundle into ../batchcode_plugin/static/
 npm run lint               # biome
 ```
+
+### Committed build artifacts
+
+Both the message catalogs (`frontend/src/locales/`) and the compiled bundles
+(`batchcode_plugin/static/`) are **committed**. InvenTree's plugin installer
+only accepts VCS URLs, which build from source, so a plugin installed from this
+repository would have no user interface otherwise.
+
+That means **any change under `frontend/src/` must be followed by**:
+
+```bash
+cd frontend && npm run translate && npm run build && cd ..
+git add frontend/src/locales batchcode_plugin/static
+```
+
+CI rebuilds both and fails if the result differs from what is committed, so a
+forgotten rebuild is caught rather than silently shipped. `npm ci` matters here:
+several dependencies are declared as `"latest"`, and only the lockfile makes
+the output reproducible.
+
+When a UI string is **removed or renamed**, `npm run translate` leaves the old
+entry behind as an obsolete `#~` comment rather than deleting it. Clear those
+out with:
+
+```bash
+cd frontend && npx lingui extract --clean && npm run compile && npm run build
+```
+
+Line endings are pinned to LF by `.gitattributes`, and this matters more than
+it looks: a sourcemap embeds its sources verbatim, so a CRLF checkout of
+`frontend/src/` produces different `.js.map` files and the CI check above would
+fail on Windows for no real reason.
+
+Nothing under `batchcode_plugin/static/` should ever be edited by hand.
 
 ### Tests
 
@@ -177,17 +251,21 @@ cannot drift from the production scope key.
 
 ### Building a release
 
-The compiled bundles in `batchcode_plugin/static/` are not committed, so the
-frontend must be built **before** the package, or the wheel ships without a UI:
+Because the bundles are committed, `uv run python -m build` on a clean checkout
+already produces a complete wheel — no frontend build needed first. Tag the
+release so installations can pin it:
 
 ```bash
-cd frontend && npm install && npm run translate && npm run build && cd ..
-uv run python -m build          # -> dist/*.whl
+git tag -a vX.Y.Z -m "BatchCodePlugin X.Y.Z"
+git push origin vX.Y.Z
 ```
 
+Then bump `PLUGIN_VERSION` in `batchcode_plugin/__init__.py` (the single source
+of the version) and the install URL in this README.
+
 There is no PyPI publishing workflow. To add one, restore the plugin creator's
-`pypi.yaml` (it triggers on `release: published` and needs a `PYPI_API_TOKEN`
-repository secret), making sure the frontend build step still runs first.
+`pypi.yaml` — it triggers on `release: published` and needs a `PYPI_API_TOKEN`
+repository secret.
 
 This project was restructured with the
 [InvenTree plugin creator](https://github.com/inventree/plugin-creator).
