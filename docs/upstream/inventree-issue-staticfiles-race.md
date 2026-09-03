@@ -1,7 +1,18 @@
-> **Status:** filed upstream as
+> **Status: fixed upstream, not yet released.** Filed as
 > [inventree/InvenTree#12769](https://github.com/inventree/InvenTree/issues/12769)
-> on 2 September 2026, awaiting triage. Follow that issue for whether the
-> behaviour changes; until it does, the `PLUGIN_ON_STARTUP` workaround in the
+> on 2 September 2026 and addressed by
+> [#12776](https://github.com/inventree/InvenTree/pull/12776), which replaces the
+> process-local hash with a persisted setting and adds a cross-process lease, and
+> makes the static collection stage into a temporary directory before writing.
+> Milestone 1.6.0, labelled for backport to 1.5.x; open at the time of writing.
+>
+> That branch was tested on the instance this analysis came from: with the two
+> production files patched into both the server and the worker container and
+> `PLUGIN_ON_STARTUP` re-enabled, five consecutive restarts left the plugin's
+> static directory complete and served, where the unpatched code lost it
+> reliably.
+>
+> Until a release carries the fix, the `PLUGIN_ON_STARTUP` workaround in the
 > README install steps stands.
 >
 > An earlier attempt, #12768, was opened through the GitHub API and so bypassed

@@ -139,10 +139,12 @@ docker compose start inventree-worker
 ```
 
 Reported upstream as
-[inventree/InvenTree#12769](https://github.com/inventree/InvenTree/issues/12769);
-the full analysis is in
-[`docs/upstream/`](docs/upstream/inventree-issue-staticfiles-race.md). This step
-stays necessary until that is addressed.
+[inventree/InvenTree#12769](https://github.com/inventree/InvenTree/issues/12769),
+and fixed by [#12776](https://github.com/inventree/InvenTree/pull/12776) —
+milestone 1.6.0, and labelled for backport to 1.5.x. **Not merged at the time of
+writing**, so check whether your version already carries it before deciding you
+need this step; the full analysis is in
+[`docs/upstream/`](docs/upstream/inventree-issue-staticfiles-race.md).
 
 **Trade-off.** With the setting off, plugins are no longer reinstalled
 automatically at startup. That is harmless across a restart, but a container
