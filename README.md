@@ -158,6 +158,27 @@ image update. Check with:
 docker compose exec inventree-server sh -c 'echo "${INVENTREE_PY_ENV:-not set}"'
 ```
 
+### Migrating from a hand-copied 1.x plugin
+
+If a copy of the 1.x plugin is sitting in the local plugins directory —
+`<data>/plugins/batchcode/` — install the package **first**, confirm it is
+loaded, and only then move the old directory aside. Doing it the other way
+round takes the plugin out of the registry for a moment, and
+`clear_plugins_static_files()` deletes the static directory of any plugin it
+does not find registered. The package then loads with no user interface until
+the files are collected again:
+
+```bash
+docker compose exec inventree-server invoke static
+```
+
+Worth knowing because the failure is quiet: a stale local copy takes priority
+when the package is missing, so the plugin appears to work while running the
+1.x code — which is the version whose `PER_PART`, `PER_LOCATION` and location
+prefix settings do nothing. Check which one is live under
+Settings → Plugins: the entry shows the version, and a package install reports
+a path under `site-packages` rather than under your data directory.
+
 ## Configuration
 
 All settings live under Settings → Plugins → Batch Code Generator.
