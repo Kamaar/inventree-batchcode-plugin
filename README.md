@@ -138,12 +138,14 @@ docker compose exec inventree-server invoke static
 docker compose start inventree-worker
 ```
 
-Reported upstream as
-[inventree/InvenTree#12769](https://github.com/inventree/InvenTree/issues/12769),
-and fixed by [#12776](https://github.com/inventree/InvenTree/pull/12776) —
-milestone 1.6.0, and labelled for backport to 1.5.x. **Not merged at the time of
-writing**, so check whether your version already carries it before deciding you
-need this step; the full analysis is in
+**This step is temporary.** The cause was
+[reported upstream](https://github.com/inventree/InvenTree/issues/12769) and
+[fixed](https://github.com/inventree/InvenTree/pull/12776); the fix is merged for
+1.6.0 and backported to 1.5.x, but no released version carries it yet (1.5.2 is
+the latest as of September 2026). Once you are on a version that has it, turn
+*Check plugins on startup* back on and skip this step — that restores the
+standard behaviour, and with it the automatic plugin reinstall the trade-off
+below describes. The full analysis is in
 [`docs/upstream/`](docs/upstream/inventree-issue-staticfiles-race.md).
 
 **Trade-off.** With the setting off, plugins are no longer reinstalled

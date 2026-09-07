@@ -86,9 +86,9 @@ Two facts combine:
 
 `PLUGIN_ON_STARTUP` ("Check plugins on startup") gates both call sites and defaults to on when
 `INVENTREE_DOCKER` is set. Turning it off is the actual fix; the README's install steps carry the
-procedure and the trade-off. Reported upstream as inventree/InvenTree#12769 and fixed by PR
-#12776 (milestone 1.6.0, labelled for backport to 1.5.x, unmerged at the time of writing) — check
-both before re-investigating, and drop the workaround once a release carries the fix.
+procedure and the trade-off. Reported upstream and fixed: the change is merged for 1.6.0 and
+backported to 1.5.x, but as of September 2026 no release carries it (1.5.2 is the latest). Drop
+the workaround, and this section with it, once a released version has the fix.
 `docs/upstream/inventree-issue-staticfiles-race.md` holds the full analysis, including why this
 is not a duplicate of the closed #12130 (which blamed an external `invoke plugins`) and #7709.
 Note that InvenTree uses issue *forms*: the GitHub API cannot submit one, which is how the first
