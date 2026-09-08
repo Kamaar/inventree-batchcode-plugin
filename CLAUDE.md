@@ -86,9 +86,11 @@ Two facts combine:
 
 `PLUGIN_ON_STARTUP` ("Check plugins on startup") gates both call sites and defaults to on when
 `INVENTREE_DOCKER` is set. Turning it off is the actual fix; the README's install steps carry the
-procedure and the trade-off. Reported upstream and fixed: the change is merged for 1.6.0 and
-backported to 1.5.x, but as of September 2026 no release carries it (1.5.2 is the latest). Drop
-the workaround, and this section with it, once a released version has the fix.
+procedure and the trade-off — now scoped to InvenTree **before 1.5.3**, which is where the
+upstream fix shipped (8 September 2026; also in 1.6.0). Verified in the released code:
+`_PLUGIN_FILE_HASH` is a persisted global setting written only after a successful install, and
+`staticfiles.py` holds a lease for the whole collection. Keep this section only while the plugin
+still supports versions that predate it.
 `docs/upstream/inventree-issue-staticfiles-race.md` holds the full analysis, including why this
 is not a duplicate of the closed #12130 (which blamed an external `invoke plugins`) and #7709.
 Note that InvenTree uses issue *forms*: the GitHub API cannot submit one, which is how the first

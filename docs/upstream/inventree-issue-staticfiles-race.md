@@ -4,10 +4,15 @@
 > [#12776](https://github.com/inventree/InvenTree/pull/12776), which replaces the
 > process-local hash with a persisted setting and adds a cross-process lease, and
 > makes the static collection stage into a temporary directory before writing.
-> Merged on 6 September 2026 for milestone 1.6.0, and the 1.5.x backport
-> ([#12802](https://github.com/inventree/InvenTree/pull/12802)) is merged too, so
-> the next 1.5.x patch should carry it. The issue is closed as completed. No
-> released version has it yet — 1.5.2, of 25 August 2026, is still the latest.
+> Merged on 6 September 2026 for milestone 1.6.0, backported via
+> [#12802](https://github.com/inventree/InvenTree/pull/12802), and **released in
+> 1.5.3 on 8 September 2026**. The issue is closed as completed.
+>
+> The shipped code persists `_PLUGIN_FILE_HASH` as a global setting and writes it
+> only after a successful install — the review point raised on the pull request,
+> since a hard kill does not run `finally` and would otherwise leave the hash
+> pointing at content that was never installed. Static collection holds a lease
+> for its whole duration.
 >
 > That branch was tested on the instance this analysis came from: with the two
 > production files patched into both the server and the worker container and

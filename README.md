@@ -102,9 +102,11 @@ Open any stock item — there should be a **Batch Code** panel showing the
 current code and a preview of the next one. If the panel is missing, revisit
 step 3; if it loads but reports an error, the migration in step 4 has not run.
 
-### 5. On Docker, turn off "Check plugins on startup"
+### 5. On Docker before InvenTree 1.5.3, turn off "Check plugins on startup"
 
-Not optional in practice, and worth doing before you hit the problem it avoids.
+**Fixed in InvenTree 1.5.3 and 1.6.0.** On those versions and later, skip this
+step entirely. It is only needed on 1.5.2 or earlier, where it is not optional
+in practice.
 
 **Symptom.** The panel shows *Error Loading Plugin Content — Failed to load
 module: …/static/plugins/batchcode/Panel-…js*, and the plugin's static files
@@ -138,15 +140,12 @@ docker compose exec inventree-server invoke static
 docker compose start inventree-worker
 ```
 
-**This step is temporary.** The cause was
-[reported upstream](https://github.com/inventree/InvenTree/issues/12769) and
-[fixed](https://github.com/inventree/InvenTree/pull/12776); the fix is merged for
-1.6.0 and backported to 1.5.x, but no released version carries it yet (1.5.2 is
-the latest as of September 2026). Once you are on a version that has it, turn
-*Check plugins on startup* back on and skip this step — that restores the
-standard behaviour, and with it the automatic plugin reinstall the trade-off
-below describes. The full analysis is in
-[`docs/upstream/`](docs/upstream/inventree-issue-staticfiles-race.md).
+The cause was [reported upstream](https://github.com/inventree/InvenTree/issues/12769)
+and [fixed](https://github.com/inventree/InvenTree/pull/12776), released in
+1.5.3 on 8 September 2026. **If you turned this off on an earlier version, turn
+it back on after upgrading** — that restores the standard behaviour, and with it
+the automatic plugin reinstall the trade-off below describes. The full analysis
+is in [`docs/upstream/`](docs/upstream/inventree-issue-staticfiles-race.md).
 
 **Trade-off.** With the setting off, plugins are no longer reinstalled
 automatically at startup. That is harmless across a restart, but a container
