@@ -316,6 +316,14 @@ The installer also only accepts **VCS URLs** (`git+https://…`, composed as `{p
 A plain `https://` URL is passed to pip as a package *index* (`-i`), so a link to a release wheel
 does not work from that form.
 
+Before InvenTree 1.5.5, `update_plugins_file()` interpolated that reference into a regex
+unescaped, so a line never matched itself and every install appended a duplicate until
+`pip install -r plugins.txt` failed with `ResolutionImpossible` — taking every other plugin down
+with it. Symptom: the plugin config row is active but `meta` is all nulls and
+`/api/plugins/batchcode/settings/` returns 404 "not installed". 1.5.5 also stops a fresh
+container skipping the install because the database hash claims it is already done, by writing a
+marker into `sys.prefix`. The README carries the user-facing version.
+
 ## Conventions
 
 - Code, setting keys and user-facing strings are English; Django strings use `gettext_lazy as _`,

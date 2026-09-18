@@ -61,6 +61,26 @@ Note that a plain `https://` URL is not an alternative here: InvenTree passes
 such URLs to pip as a *package index* (`-i`), not as a package to install, so a
 link to a release file will not work.
 
+**Before InvenTree 1.5.5, reinstall with exactly the same URL string.** Older
+versions compared plugins-file entries with the reference interpolated into a
+regex unescaped, so `git+https://…` never matched itself and each install
+*appended* a line instead of replacing it. A few upgrades later
+`<data>/plugins.txt` holds several entries for this package, `pip install -r`
+fails with `ResolutionImpossible`, and **no plugin gets installed at all** —
+including the others listed in that file. If it happens, keep one line and
+restart:
+
+```bash
+docker compose exec -T inventree-server sh -c "
+  cp /home/inventree/data/plugins.txt /home/inventree/data/plugins.txt.bak
+  grep -v 'inventree-batchcode-plugin' /home/inventree/data/plugins.txt > /tmp/p.txt
+  echo 'inventree-batchcode-plugin@git+https://github.com/Kamaar/inventree-batchcode-plugin.git@v2.0.2' >> /tmp/p.txt
+  cp /tmp/p.txt /home/inventree/data/plugins.txt
+"
+```
+
+1.5.5 escapes the reference and anchors the match, so it replaces correctly.
+
 ### 2. Enable the plugin
 
 Activate **BatchCodePlugin** in Settings → Plugins.
