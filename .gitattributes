@@ -18,3 +18,6 @@ frontend/src/locales/**/messages.d.ts -text
 # Lockfiles are generated; keep them out of diff review noise
 frontend/package-lock.json -diff linguist-generated
 uv.lock -diff linguist-generated
+
+# The social preview image is uploaded to GitHub as-is; never transform it.
+docs/social-preview.png -text
